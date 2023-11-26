@@ -1,26 +1,343 @@
 import asyncio
 import difflib
+import enum
 import os
-from time import time
+import socket
+import time
+from typing import Set, Optional, Union
 
 import aiohttp
+import psycopg2.extensions
 import requests
 from lxml import html
 from selenium import webdriver
+from selenium.webdriver import ChromeOptions, ChromeService
 from selenium.webdriver.common.by import By
-from webdriver_manager.firefox import GeckoDriverManager
-from selenium.webdriver import FirefoxOptions, FirefoxService
-from models import *
+from webdriver_manager.chrome import ChromeDriverManager
 
-PSU = University("Пермь", "ПГНИУ")
-PSTU = University("Пермь", "Политех")
+from const import *
 
-TMP_PSU = "psu"
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+while True:
+    try:
+        s.connect(('db', 5432))
+        s.close()
+        break
+    except socket.error as ex:
+        time.sleep(0.1)
+
+URL_PSU = "http://www.psu.ru/files/docs/priem-2023/"
+URL_PSTU = "https://pstu.ru/enrollee/stat2023/pol2023/"
 TMP_PSTU = "pstu"
 
 
-def uprint(*args):
-    print("\r" + " " * 1000 + "\r" + " ".join(map(str, args)), end='')
+class University:
+    ALL: list["University"] = []
+
+    def __init__(self, name: str, city: str):
+        self.name = name
+        self.city = city
+
+        CUR.execute(
+            f"insert into universities (name, city) "
+            f"values ({repr(name)}, {repr(city)}) "
+            f"on conflict (name) do nothing"
+        )
+
+        self._faculties: list[Faculty] = []
+        University.ALL.append(self)
+
+    def __str__(self):
+        return f"{RC}U{BL_C}({NC}{self.name} г.{self.city}{BL_C}){NC}"
+
+    def add_faculty(self, faculty: "Faculty"):
+        self._faculties.append(faculty)
+
+    def find_d(self, name) -> Optional["Direct"]:
+        f = (None, 0)
+        for faculty in self._faculties:
+            for direct in faculty._directs:
+                r = difflib.SequenceMatcher(None, direct.fullname(), name).ratio()
+                f = max(f, (direct, r), key=lambda x: x[1])
+        return f[0]
+
+
+class Faculty:
+    count = 0
+
+    def __init__(self, university: "University", name: str):
+        self.id = Faculty.count
+        Faculty.count += 1
+
+        self.uni = university
+        self.name = name
+
+        CUR.execute(
+            f"insert into faculties(id, university, name) "
+            f"values ({self.id}, {repr(self.uni.name)}, {repr(self.name)}) "
+            f"on conflict (id) do nothing"
+        )
+
+        self.uni.add_faculty(self)
+        self._directs = []
+
+    def __str__(self):
+        return f"{RC}F{GR_C}({NC}{self.name}{GR_C}){NC}"
+
+    def add_direct(self, direct: "Direct"):
+        self._directs.append(direct)
+
+    @classmethod
+    def from_name_and_uni(cls, university: "University", name: str):
+        for faculty in university._faculties:
+            if faculty.name == name:
+                return faculty
+        return cls(university, name)
+
+    def find_d(self, name) -> Optional["Direct"]:
+        f = (None, 0)
+        for direct in self._directs:
+            r = difflib.SequenceMatcher(None, direct.name, name).ratio()
+            if r >= 0.5:
+                f = max(f, (direct, r), key=lambda x: x[1])
+        return f[0]
+
+
+class Direct:
+    count = 0
+
+    class Group:
+        count = 0
+
+        class Type(enum.Enum):
+            BUDGET = "Бюджет"
+            CONTRACT = "Договор"
+            TARGET = "Целевое"
+
+        NAME2ID_TYPES = {
+            Type.BUDGET: 0,
+            Type.CONTRACT: 1,
+            Type.TARGET: 2
+        }
+
+        def __init__(self, direct: "Direct", type_group: "Direct.Group.Type"):
+            self.id = Direct.Group.count
+            Direct.Group.count += 1
+
+            self.direct = direct
+            self.type = type_group
+
+            CUR.execute(
+                f"insert into groups(id, direct, type) "
+                f"values ({self.id}, {self.direct.id}, {Direct.Group.NAME2ID_TYPES[self.type]}) "
+                f"on conflict (id) do nothing"
+            )
+
+            self._categories: Set["Direct.Category"] = set()
+
+        def __str__(self):
+            return f"{RC}G{NC}({self.type.name})"
+
+        def __getitem__(self, category_type: "Direct.Category.Type") -> "Direct.Category":
+            for category in self._categories:
+                if category.type == category_type:
+                    return category
+            category = Direct.Category(self, category_type)
+            self._categories.add(category)
+            return category
+
+        def __hash__(self):
+            return hash(self.type)
+
+    class Category:
+        count = 0
+
+        class Type(enum.Enum):
+            MAIN = "Общий конкурс"
+            SPECIAL = "Особое право"
+            EXTRA = "Специальная квота"
+            WEE = "БВИ"
+            FOREIGN = "Иностранцы"
+            TARGET = "Целевое"
+
+        NAME2ID_TYPES = {
+            Type.MAIN: 0,
+            Type.SPECIAL: 1,
+            Type.EXTRA: 2,
+            Type.WEE: 3,
+            Type.FOREIGN: 4,
+            Type.TARGET: 5
+        }
+
+        class CtrlNumber:
+            def __init__(self, total: int, has: int):
+                self.total = total
+                self.has = has
+                assert total >= has
+
+            def __str__(self):
+                return f"{RC}CN{NC}({BC}{self.has}{NC}/{BC}{self.total}{NC})"
+
+            def __repr__(self):
+                return str(self)
+
+            def remove(self, other: "Direct.Category.CtrlNumber"):
+                self.has -= other.has
+                self.total -= other.total
+
+        def __init__(self, group: "Direct.Group", type_category: "Direct.Category.Type"):
+            self.id = Direct.Category.count
+            Direct.Category.count += 1
+
+            self.group = group
+            self.type = type_category
+            self.ctrl_number = Direct.Category.CtrlNumber(0, 0)
+            CUR.execute(
+                f"""insert into categories(id, "group", type, ctrl_number) """
+                f"values ("
+                f"{self.id}, {self.group.id}, {Direct.Category.NAME2ID_TYPES[self.type]}, {self.ctrl_number.total}"
+                f") "
+                f"on conflict (id) do nothing"
+            )
+
+            self.requests: list["Request"] = []
+
+        def __str__(self):
+            return f"{RC}C{NC}({self.type.name})"
+
+        def __getitem__(self, rating_or_student: Union[int, "User"]) -> Optional["Request"]:
+            if isinstance(rating_or_student, int):
+                for request in self.requests:
+                    if request.rating == rating_or_student:
+                        return request
+            else:
+                for request in self.requests:
+                    if request.user == rating_or_student:
+                        return request
+
+        def __hash__(self):
+            return hash(self.type)
+
+    def __init__(self, faculty: "Faculty", name: str, form: str, level: str):
+        self.id = Direct.count
+        Direct.count += 1
+
+        self.faculty = faculty
+
+        self.name = name
+        self.form = form
+        self.level = level
+        self._groups: Set["Direct.Group"] = set()
+
+        CUR.execute(
+            f"insert into directs(id, name, form, level, faculty) "
+            f"values ({self.id}, {repr(self.name)}, {repr(self.form)}, {repr(self.level)}, {self.faculty.id}) "
+            f"on conflict (id) do nothing"
+        )
+
+        self.faculty.add_direct(self)
+
+    def __str__(self):
+        return f"{RC}D{NC}({self.name})"
+
+    def __getitem__(self, group_type: "Direct.Group.Type") -> "Direct.Group":
+        for group in self._groups:
+            if group.type == group_type:
+                return group
+        group = Direct.Group(self, group_type)
+        self._groups.add(group)
+        return group
+
+    def __hash__(self):
+        return hash(str(self))
+
+    def fullname(self):
+        return f"{self.level} {self.form} {self.faculty} {self.name}"
+
+    @classmethod
+    def from_name_and_fac(cls, faculty: "Faculty", name: str, form: str, level: str):
+        for direct in faculty._directs:
+            if direct.name == name and direct.form == form and direct.level == level:
+                return direct
+        return cls(faculty, name, form, level)
+
+
+class Request:
+    count = 0
+
+    def __init__(self, rating: int, user: "User", category: "Direct.Category", **options):
+        self.id = Request.count
+        Request.count += 1
+
+        self.rating = rating
+        self.user = user
+        self.category = category
+
+        self.total_sum = options.pop("total_sum", 0)
+        self.marks = options.pop("marks", (0, 0, 0))
+        self.original_doc = options.pop("original_doc", False)
+        self.consent_enr = options.pop("consent_enr", False)
+
+        CUR.execute(
+            f"""insert into requests(id, rating, "user", category, total_sum, original_doc)"""
+            f"values ("
+            f"{self.id}, {self.rating}, {repr(self.user.snils)}, {self.category.id}, {self.total_sum}, {self.original_doc}"
+            f")"
+        )
+
+        self.user.requests.add(self)
+
+    def __str__(self):
+        marks = ", ".join(f"{BC}{m}{NC}" for m in self.marks)
+        return f"{RC}R{BL_C}({NC}№{BC}{self.rating}{NC} {self.user} m={BC}{self.total_sum}{NC} ({marks}){BL_C}){NC}"
+
+    def __hash__(self):
+        return hash(str(self))
+
+    def is_consent(self):
+        return self.original_doc or self.consent_enr
+
+
+class User:
+    ALL: Set["User"] = set()
+
+    def __init__(self, snils: str):
+        self.snils = snils.replace("-", "").replace(" ", "")
+        self.name = None
+
+        CUR.execute(
+            f"""insert into users(id)"""
+            f"values ({repr(self.snils)})"
+            f"on conflict (id) do nothing "
+        )
+
+        self.requests: Set["Request"] = set()
+        User.ALL.add(self)
+
+    def __str__(self):
+        return f"{RC}S{NC}({GC}{self.name or self.snils}{NC})"
+
+    def __eq__(self, other: "User"):
+        return self.snils == other.snils
+
+    def __ne__(self, other: "User"):
+        return self.snils != other.snils
+
+    def __hash__(self):
+        return hash("Student:" + self.snils)
+
+    @classmethod
+    def from_snils(cls, snils: str):
+        snils = snils.replace("-", "").replace(" ", "")
+        for elem in User.ALL:
+            if elem.snils == snils:
+                return elem
+        return cls(snils)
+
+    def get_consent_req(self) -> Optional["Request"]:
+        for req in self.requests:
+            if req.is_consent():
+                return req
 
 
 def accept_indexes(index_data: dict, titles):
@@ -37,23 +354,19 @@ def accept_indexes(index_data: dict, titles):
                 to_find_title.remove(check_title)
                 break
 
-    assert not (to_find_title - {"total_sum"}), f"Не найдены колонки {to_find_title} среди {titles}"
+    # assert not (to_find_title - {"total_sum"}), f"Не найдены колонки {to_find_title} среди {titles}"
     return indexes
 
 
-def parse_psu(load=False):
-    if load:
-        uprint(f"{PSU} Загрузка данных...")
-        with open("psu_data.html", mode='wb') as file:
-            file.write(requests.get("http://www.psu.ru/files/docs/priem-2023/").content)
-    with open("psu_data.html", encoding="utf8") as file:
-        uprint(f"{PSU} Чтение...")
-        psu_data = file.read()
+def parse_psu():
+    psu = University('ПГНИУ', 'Пермь')
+    print(f"Парсим {psu}")
 
+    print(f"Скачиваем таблицы...")
+    psu_data = requests.get(URL_PSU).content.decode('utf8')
     directs_data = html.fromstring(psu_data).xpath("//article")
-    count_directs = len(directs_data)
-    uprint(f"{PSU} Парсинг 0.0%")
 
+    print("Парсим...")
     for i, direct_data in enumerate(directs_data):
         # Парс
         level_form, fac_name, dir_name = list(map(lambda x: x.text, direct_data.find("h2").findall("span")))
@@ -62,6 +375,7 @@ def parse_psu(load=False):
         tables = list(map(lambda x: x.findall("tr"), direct_data.findall("table")))
         numbers_data = list(map(lambda x: list(map(
             lambda y: int(y.text or 0), x)), direct_data.findall("p")[2:]))
+
         sub_numbers_data = list(map(
             lambda x: list(map(
                 lambda y: (y.text.strip()[:-1], Direct.Category.CtrlNumber(
@@ -70,7 +384,7 @@ def parse_psu(load=False):
             direct_data.findall("ul")))
 
         # Добавление факультета и направления
-        faculty = Faculty.from_name_and_uni(PSU, fac_name)
+        faculty = Faculty.from_name_and_uni(psu, fac_name)
         direct = Direct.from_name_and_fac(faculty, dir_name, form, level)
 
         # Добавление недостающих списков для таблиц
@@ -106,7 +420,7 @@ def parse_psu(load=False):
                     main_ctrl_number.remove(foreign_ctrl_number)
                     direct[Direct.Group.Type.CONTRACT][Direct.Category.Type.FOREIGN].ctrl_number = foreign_ctrl_number
             else:
-                assert False, f"Неизвестная группа {repr(group_name)}"
+                assert False, f"Неизвестная группа {repr(group_name).encode().decode('utf8')} {faculty} {direct}"
 
             if not table:
                 continue
@@ -159,82 +473,74 @@ def parse_psu(load=False):
                 snils = cols[index_title["snils"]].find("font").text or ""
                 original_doc = bool(cols[index_title["original_doc"]].text)
                 total_sum = int(cols[index_title["total_sum"]].text or 0)
-
-                req = Request(rating, Student.from_snils(snils), category,
+                req = Request(rating, User.from_snils(snils), category,
                               total_sum=total_sum, original_doc=original_doc)
                 category.requests.append(req)
 
-        uprint(f"{PSU} Парсинг {round((i + 1) / count_directs * 100, 2)}%")
-
-    uprint(f"{PSU} Готово!")
-    print()
+    print(f"{psu} Готово!")
 
 
-def parse_pstu(load=False, load_links=False):
-    if load_links:
-        options = FirefoxOptions()
-        options.add_argument("--headless")
-        with webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=options) as driver:
-            driver.get("https://pstu.ru/enrollee/stat2023/pol2023/")
-            main_elem = driver.find_element(By.CLASS_NAME, value="pol2013")
-            uprint(f"{PSTU} Загрузка ссылок...")
-            links = list(map(lambda x: x.get_attribute("href"), main_elem.find_elements(By.XPATH, value=".//ul/li/a")))
+def parse_pstu():
+    pstu = University("ПНИПУ", "Пермь")
+    print(f"Парсим {pstu}")
 
-        uprint(f"{PSTU} Скачивание 0%")
-        with open(f"{TMP_PSTU}/pstu_data.txt", mode='w') as file:
-            file.write("\n".join(links))
+    class AsnycGrab(object):
 
-    if load:
-        class AsnycGrab(object):
+        def __init__(self, url_list, max_threads):
+            self.urls = url_list
+            self.downloaded = set()
+            self.max_threads = max_threads  # Номер процесса
 
-            def __init__(self, url_list, max_threads):
-                self.urls = url_list
-                self.downloaded = set()
-                self.max_threads = max_threads  # Номер процесса
+        @staticmethod
+        async def download(url, filename):
+            # Отправлять запрос асинхронно
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=30) as response:
+                    assert response.status == 200, f"Response status: {response.status}"
+                    with open(filename, mode='wb') as file:
+                        file.write(await response.read())
 
-            @staticmethod
-            async def download(url, filename):
-                # Отправлять запрос асинхронно
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url, timeout=30) as response:
-                        assert response.status == 200, f"Response status: {response.status}"
-                        with open(filename, mode='wb') as file:
-                            file.write(await response.read())
+        async def handle_tasks(self, task_id, work_queue):
+            while not work_queue.empty():
+                index, current_url = await work_queue.get()  # Получить url из очереди
+                try:
+                    await self.download(current_url.strip(), f"{TMP_PSTU}/pstu_data{str(index).rjust(4, '0')}.html")
+                    self.downloaded.add(current_url)
+                except Exception as e:
+                    print(e, current_url)
 
-            async def handle_tasks(self, task_id, work_queue):
-                while not work_queue.empty():
-                    index, current_url = await work_queue.get()  # Получить url из очереди
-                    try:
-                        await self.download(current_url.strip(), f"{TMP_PSTU}/pstu_data{str(index).rjust(4, '0')}.html")
-                        self.downloaded.add(current_url)
-                    except Exception as e:
-                        print(e, current_url)
+        async def handle_progress(self, task_id):
+            while True:
+                if len(self.downloaded) == len(self.urls):
+                    break
+                await asyncio.sleep(0.01)
 
-            async def handle_progress(self, task_id):
-                uprint(f"{PSTU} Скачивание 0.0%")
-                while True:
-                    uprint(f"{PSTU} Скачивание {round(len(self.downloaded) / len(self.urls) * 100, 2)}%")
-                    if len(self.downloaded) == len(self.urls):
-                        break
-                    await asyncio.sleep(0.01)
+        def eventloop(self):
+            if not os.path.isdir(TMP_PSTU):
+                os.mkdir(TMP_PSTU)
+            q = asyncio.Queue()  # Coroutine queue
+            [q.put_nowait((i, url)) for i, url in enumerate(self.urls)]  # Обсуждение url все поставлено в очередь
+            loop = asyncio.get_event_loop()  # Создать цикл событий
 
-            def eventloop(self):
-                if not os.path.isdir(TMP_PSTU):
-                    os.mkdir(TMP_PSTU)
-                q = asyncio.Queue()  # Coroutine queue
-                [q.put_nowait((i, url)) for i, url in enumerate(self.urls)]  # Обсуждение url все поставлено в очередь
-                loop = asyncio.get_event_loop()  # Создать цикл событий
+            tasks = [self.handle_tasks(task_id, q, ) for task_id in range(self.max_threads)]
+            tasks.append(self.handle_progress(len(self.urls) + 1))
+            loop.run_until_complete(asyncio.wait(tasks))
 
-                tasks = [self.handle_tasks(task_id, q, ) for task_id in range(self.max_threads)]
-                tasks.append(self.handle_progress(len(self.urls) + 1))
-                loop.run_until_complete(asyncio.wait(tasks))
+    print("Загружаем ссылки на таблицы...")
+    options = ChromeOptions()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    with webdriver.Firefox(service=ChromeService(ChromeDriverManager().install()), options=options) as driver:
+        driver.get(URL_PSTU)
+        main_elem = driver.find_element(By.CLASS_NAME, value="pol2013")
+        links = list(map(lambda x: x.get_attribute("href"), main_elem.find_elements(By.XPATH, value=".//ul/li/a")))
 
-        with open(f"{TMP_PSTU}/pstu_data.txt") as file:
-            links = file.readlines()
-        async_example = AsnycGrab(links, 100)
-        async_example.eventloop()
+    print("Скачиваем таблицы...")
+    async_example = AsnycGrab(links, 100)
+    async_example.eventloop()
+
     filenames = os.listdir("pstu")
-    uprint(f"Парсинг 0.0%")
     group_aliases = {
         "Бюджетная основа": Direct.Group.Type.BUDGET,
         "Полное возмещение затрат": Direct.Group.Type.CONTRACT
@@ -244,6 +550,7 @@ def parse_pstu(load=False, load_links=False):
         "Имеющие особое право": Direct.Category.Type.SPECIAL
     }
 
+    print("Парсим...")
     for i, filename in enumerate(filenames):
         if not filename.endswith(".html"):
             continue
@@ -263,7 +570,7 @@ def parse_pstu(load=False, load_links=False):
         titles = list(map(lambda x: x.text, direct_data[12].findall("td")))
         reqs = direct_data[13:]
 
-        faculty = Faculty.from_name_and_uni(PSTU, faculty_name)
+        faculty = Faculty.from_name_and_uni(pstu, faculty_name)
         direct = Direct.from_name_and_fac(faculty, real_direct_name, form, level)
         ctrl_number = Direct.Category.CtrlNumber(int(ctrl_number_inner.split()[2][:-1]),
                                                  int(ctrl_number_inner.split()[-1][:-1]))
@@ -311,20 +618,26 @@ def parse_pstu(load=False, load_links=False):
                 a="Оригинал",
                 b=(cols[index_title["original_doc"]].text or "").strip()
             ).ratio() > 0.9
-            req = Request(rating, Student.from_snils(snils), category, total_sum=total_sum, original_doc=original_doc)
+            req = Request(rating, User.from_snils(snils), category, total_sum=total_sum, original_doc=original_doc)
             category.requests.append(req)
 
-        uprint(f"{PSTU} Парсинг {round((i + 1) / len(filenames) * 100, 2)}%")
-    uprint(f"{PSTU} Готово!")
-    print()
+    print(f"{pstu} Готово!")
 
 
-def parse_all(load=False):
-    t = time()
-    parse_psu(load)
-    parse_pstu(load, load_links=load)
-    print("Парсинг завершён за", time() - t, "секунд")
+def parse_all():
+    print("Парсинг начат...")
+
+    parse_psu()
+    parse_pstu()
+
+    print("Парсинг завершён!")
 
 
 if __name__ == "__main__":
-    parse_pstu(load=False, load_links=False)
+    with psycopg2.connect(host="db", database="postgres", user="postgres", password="rooter") as CONN:
+        with CONN.cursor() as CUR:
+            CONN: psycopg2.extensions.connection
+            CUR: psycopg2.extensions.cursor
+            CUR.execute("delete from requests")
+            CONN.commit()
+            parse_all()

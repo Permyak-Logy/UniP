@@ -1,0 +1,37 @@
+version: "3"
+services:
+  parser:
+    build: parser/
+    depends_on:
+      - db
+    command: "echo 0" #python ./main.py
+    ports:
+      - 1234:1234
+    networks:
+      - mynet
+  db:
+    image: postgres:latest
+    user: postgres
+    environment:
+      POSTGRES_DB: "postgres"
+      POSTGRES_PASSWORD: "rooter"
+      PGDATA: "/var/lib/postgresql/data/pgdata"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready", "-d", "postgres"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    volumes:
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/pg_hba.conf:/var/lib/postgresql/data/pg_hba.conf
+      - ./database/postgresql.conf:/var/lib/postgresql/data/postgresql.conf
+    ports:
+      - "5432:5432"
+    networks:
+      - mynet
+volumes:
+  postgres-data:
+    driver: local
+networks:
+  mynet:

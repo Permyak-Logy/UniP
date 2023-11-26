@@ -1,0 +1,6 @@
+aiohttp
+requests
+lxml
+selenium
+webdriver-manager
+psycopg2-binary
