@@ -626,11 +626,12 @@ def parse_pstu():
 
 def parse_all():
     print("Парсинг начат...")
+    t = time.time()
 
     parse_psu()
     parse_pstu()
 
-    print("Парсинг завершён!")
+    print(f"Парсинг завершён за {time.time() - t}!")
 
 
 if __name__ == "__main__":

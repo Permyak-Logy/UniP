@@ -4,7 +4,7 @@ services:
     build: parser/
     depends_on:
       - db
-    command: "echo 0" #python ./main.py
+    command: python ./main.py
     ports:
       - 1234:1234
     networks:
