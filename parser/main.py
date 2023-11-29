@@ -4,8 +4,8 @@ import enum
 import os
 import socket
 import time
-from typing import Set, Optional, Union
-
+from typing import Set, Optional
+import sys
 import aiohttp
 import psycopg2.extensions
 import requests
@@ -14,18 +14,9 @@ from selenium import webdriver
 from selenium.webdriver import ChromeOptions, ChromeService
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
-
 from const import *
 
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-while True:
-    try:
-        s.connect(('db', 5432))
-        s.close()
-        break
-    except socket.error as ex:
-        time.sleep(0.1)
-
+sys.stdout = sys.stderr  # TODO: Костыль чтобы логи в докере быстрее выводились
 URL_PSU = "http://www.psu.ru/files/docs/priem-2023/"
 URL_PSTU = "https://pstu.ru/enrollee/stat2023/pol2023/"
 TMP_PSTU = "pstu"
@@ -63,11 +54,11 @@ class University:
 
 
 class Faculty:
-    count = 0
+    _count = 0
 
     def __init__(self, university: "University", name: str):
-        self.id = Faculty.count
-        Faculty.count += 1
+        self.id = Faculty._count
+        Faculty._count += 1
 
         self.uni = university
         self.name = name
@@ -94,20 +85,12 @@ class Faculty:
                 return faculty
         return cls(university, name)
 
-    def find_d(self, name) -> Optional["Direct"]:
-        f = (None, 0)
-        for direct in self._directs:
-            r = difflib.SequenceMatcher(None, direct.name, name).ratio()
-            if r >= 0.5:
-                f = max(f, (direct, r), key=lambda x: x[1])
-        return f[0]
-
 
 class Direct:
-    count = 0
+    _count = 0
 
     class Group:
-        count = 0
+        _count = 0
 
         class Type(enum.Enum):
             BUDGET = "Бюджет"
@@ -121,8 +104,8 @@ class Direct:
         }
 
         def __init__(self, direct: "Direct", type_group: "Direct.Group.Type"):
-            self.id = Direct.Group.count
-            Direct.Group.count += 1
+            self.id = Direct.Group._count
+            Direct.Group._count += 1
 
             self.direct = direct
             self.type = type_group
@@ -150,7 +133,7 @@ class Direct:
             return hash(self.type)
 
     class Category:
-        count = 0
+        _count = 0
 
         class Type(enum.Enum):
             MAIN = "Общий конкурс"
@@ -186,8 +169,8 @@ class Direct:
                 self.total -= other.total
 
         def __init__(self, group: "Direct.Group", type_category: "Direct.Category.Type"):
-            self.id = Direct.Category.count
-            Direct.Category.count += 1
+            self.id = Direct.Category._count
+            Direct.Category._count += 1
 
             self.group = group
             self.type = type_category
@@ -200,27 +183,15 @@ class Direct:
                 f"on conflict (id) do nothing"
             )
 
-            self.requests: list["Request"] = []
-
         def __str__(self):
             return f"{RC}C{NC}({self.type.name})"
-
-        def __getitem__(self, rating_or_student: Union[int, "User"]) -> Optional["Request"]:
-            if isinstance(rating_or_student, int):
-                for request in self.requests:
-                    if request.rating == rating_or_student:
-                        return request
-            else:
-                for request in self.requests:
-                    if request.user == rating_or_student:
-                        return request
 
         def __hash__(self):
             return hash(self.type)
 
     def __init__(self, faculty: "Faculty", name: str, form: str, level: str):
-        self.id = Direct.count
-        Direct.count += 1
+        self.id = Direct._count
+        Direct._count += 1
 
         self.faculty = faculty
 
@@ -251,51 +222,12 @@ class Direct:
     def __hash__(self):
         return hash(str(self))
 
-    def fullname(self):
-        return f"{self.level} {self.form} {self.faculty} {self.name}"
-
     @classmethod
     def from_name_and_fac(cls, faculty: "Faculty", name: str, form: str, level: str):
         for direct in faculty._directs:
             if direct.name == name and direct.form == form and direct.level == level:
                 return direct
         return cls(faculty, name, form, level)
-
-
-class Request:
-    count = 0
-
-    def __init__(self, rating: int, user: "User", category: "Direct.Category", **options):
-        self.id = Request.count
-        Request.count += 1
-
-        self.rating = rating
-        self.user = user
-        self.category = category
-
-        self.total_sum = options.pop("total_sum", 0)
-        self.marks = options.pop("marks", (0, 0, 0))
-        self.original_doc = options.pop("original_doc", False)
-        self.consent_enr = options.pop("consent_enr", False)
-
-        CUR.execute(
-            f"""insert into requests(id, rating, "user", category, total_sum, original_doc)"""
-            f"values ("
-            f"{self.id}, {self.rating}, {repr(self.user.snils)}, {self.category.id}, {self.total_sum}, {self.original_doc}"
-            f")"
-        )
-
-        self.user.requests.add(self)
-
-    def __str__(self):
-        marks = ", ".join(f"{BC}{m}{NC}" for m in self.marks)
-        return f"{RC}R{BL_C}({NC}№{BC}{self.rating}{NC} {self.user} m={BC}{self.total_sum}{NC} ({marks}){BL_C}){NC}"
-
-    def __hash__(self):
-        return hash(str(self))
-
-    def is_consent(self):
-        return self.original_doc or self.consent_enr
 
 
 class User:
@@ -317,12 +249,6 @@ class User:
     def __str__(self):
         return f"{RC}S{NC}({GC}{self.name or self.snils}{NC})"
 
-    def __eq__(self, other: "User"):
-        return self.snils == other.snils
-
-    def __ne__(self, other: "User"):
-        return self.snils != other.snils
-
     def __hash__(self):
         return hash("Student:" + self.snils)
 
@@ -334,10 +260,67 @@ class User:
                 return elem
         return cls(snils)
 
-    def get_consent_req(self) -> Optional["Request"]:
-        for req in self.requests:
-            if req.is_consent():
-                return req
+
+class Request:
+    _count = 0
+
+    @staticmethod
+    def add(rating: int, user: "User", category: "Direct.Category", original_doc: bool, total_sum: int = 0):
+        CUR.execute(
+            f"""insert into requests(id, rating, "user", category, total_sum, original_doc)"""
+            f"values ("
+            f"{Request._count}, {rating}, {repr(user.snils)}, {category.id}, {total_sum}, {original_doc}"
+            f")"
+        )
+        Request._count += 1
+
+    @staticmethod
+    def reset():
+        CUR.execute("delete from requests")
+        Request._count = 0
+
+
+class AsnycGrab(object):
+
+    def __init__(self, url_list, max_threads):
+        self.urls = url_list
+        self.downloaded = set()
+        self.max_threads = max_threads  # Номер процесса
+
+    @staticmethod
+    async def download(url, fn):
+        # Отправлять запрос асинхронно
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=30) as response:
+                assert response.status == 200, f"Response status: {response.status}"
+                with open(fn, mode='wb') as f:
+                    f.write(await response.read())
+
+    async def handle_tasks(self, work_queue):
+        while not work_queue.empty():
+            index, current_url = await work_queue.get()  # Получить url из очереди
+            try:
+                await self.download(current_url.strip(), f"{TMP_PSTU}/pstu_data{str(index).rjust(4, '0')}.html")
+                self.downloaded.add(current_url)
+            except Exception as e:
+                print(e, current_url)
+
+    async def handle_progress(self):
+        while True:
+            if len(self.downloaded) == len(self.urls):
+                break
+            await asyncio.sleep(0.01)
+
+    def eventloop(self):
+        if not os.path.isdir(TMP_PSTU):
+            os.mkdir(TMP_PSTU)
+        q = asyncio.Queue()  # Coroutine queue
+        [q.put_nowait((i, url)) for i, url in enumerate(self.urls)]  # Обсуждение url все поставлено в очередь
+        loop = asyncio.get_event_loop()  # Создать цикл событий
+
+        tasks = [self.handle_tasks(q) for _ in range(self.max_threads)]
+        tasks.append(self.handle_progress())
+        loop.run_until_complete(asyncio.wait(tasks))
 
 
 def accept_indexes(index_data: dict, titles):
@@ -356,6 +339,18 @@ def accept_indexes(index_data: dict, titles):
 
     # assert not (to_find_title - {"total_sum"}), f"Не найдены колонки {to_find_title} среди {titles}"
     return indexes
+
+
+def wain_conn():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    while True:
+        try:
+            s.connect(('db', 5432))
+            s.close()
+            break
+        except socket.error:
+            time.sleep(0.1)
+    time.sleep(3)  # TODO: Заменить на реальную проверку на работоспособность бд
 
 
 def parse_psu():
@@ -473,9 +468,9 @@ def parse_psu():
                 snils = cols[index_title["snils"]].find("font").text or ""
                 original_doc = bool(cols[index_title["original_doc"]].text)
                 total_sum = int(cols[index_title["total_sum"]].text or 0)
-                req = Request(rating, User.from_snils(snils), category,
-                              total_sum=total_sum, original_doc=original_doc)
-                category.requests.append(req)
+
+                Request.add(rating, User.from_snils(snils), category,
+                            total_sum=total_sum, original_doc=original_doc)
 
     print(f"{psu} Готово!")
 
@@ -483,48 +478,6 @@ def parse_psu():
 def parse_pstu():
     pstu = University("ПНИПУ", "Пермь")
     print(f"Парсим {pstu}")
-
-    class AsnycGrab(object):
-
-        def __init__(self, url_list, max_threads):
-            self.urls = url_list
-            self.downloaded = set()
-            self.max_threads = max_threads  # Номер процесса
-
-        @staticmethod
-        async def download(url, filename):
-            # Отправлять запрос асинхронно
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=30) as response:
-                    assert response.status == 200, f"Response status: {response.status}"
-                    with open(filename, mode='wb') as file:
-                        file.write(await response.read())
-
-        async def handle_tasks(self, task_id, work_queue):
-            while not work_queue.empty():
-                index, current_url = await work_queue.get()  # Получить url из очереди
-                try:
-                    await self.download(current_url.strip(), f"{TMP_PSTU}/pstu_data{str(index).rjust(4, '0')}.html")
-                    self.downloaded.add(current_url)
-                except Exception as e:
-                    print(e, current_url)
-
-        async def handle_progress(self, task_id):
-            while True:
-                if len(self.downloaded) == len(self.urls):
-                    break
-                await asyncio.sleep(0.01)
-
-        def eventloop(self):
-            if not os.path.isdir(TMP_PSTU):
-                os.mkdir(TMP_PSTU)
-            q = asyncio.Queue()  # Coroutine queue
-            [q.put_nowait((i, url)) for i, url in enumerate(self.urls)]  # Обсуждение url все поставлено в очередь
-            loop = asyncio.get_event_loop()  # Создать цикл событий
-
-            tasks = [self.handle_tasks(task_id, q, ) for task_id in range(self.max_threads)]
-            tasks.append(self.handle_progress(len(self.urls) + 1))
-            loop.run_until_complete(asyncio.wait(tasks))
 
     print("Загружаем ссылки на таблицы...")
     options = ChromeOptions()
@@ -562,7 +515,7 @@ def parse_pstu():
         form = direct_data[3].find("td").text.replace("Форма обучения - ", "")
         faculty_name = direct_data[4].find("td").text.replace("Подразделение - ", "")
         level = direct_data[5].find("td").text.replace("Уровень подготовки - ", "")
-        direct_name = direct_data[6].find("td").text.replace("Направление подготовки/специальность - ", "")  # Unused
+        _ = direct_data[6].find("td").text.replace("Направление подготовки/специальность - ", "")  # Unused
         group_name = direct_data[7].find("td").text.replace("Основание поступления - ", "")
         category_name = direct_data[8].find("td").text.replace("Категория приема - ", "")
         real_direct_name = direct_data[9].find("td").text.replace("Конкурсная группа - ", "")
@@ -618,8 +571,9 @@ def parse_pstu():
                 a="Оригинал",
                 b=(cols[index_title["original_doc"]].text or "").strip()
             ).ratio() > 0.9
-            req = Request(rating, User.from_snils(snils), category, total_sum=total_sum, original_doc=original_doc)
-            category.requests.append(req)
+
+            Request.add(rating, User.from_snils(snils), category,
+                        total_sum=total_sum, original_doc=original_doc)
 
     print(f"{pstu} Готово!")
 
@@ -627,18 +581,28 @@ def parse_pstu():
 def parse_all():
     print("Парсинг начат...")
     t = time.time()
-
+    Request.reset()
+    CONN.commit()
     parse_psu()
     parse_pstu()
-
+    CUR.execute(f"UPDATE update_data SET last_update_timestamp = {t}")
+    CONN.commit()
     print(f"Парсинг завершён за {time.time() - t}!")
 
 
 if __name__ == "__main__":
+    wain_conn()
+
     with psycopg2.connect(host="db", database="postgres", user="postgres", password="rooter") as CONN:
         with CONN.cursor() as CUR:
             CONN: psycopg2.extensions.connection
             CUR: psycopg2.extensions.cursor
-            CUR.execute("delete from requests")
-            CONN.commit()
-            parse_all()
+
+            CUR.execute("SELECT last_update_timestamp FROM update_data")
+            update_time = 12 * 60 * 60
+            w = max(0, int(update_time - (time.time() - CUR.fetchone()[0])))
+            print(f"Запущен! Следующее обновление через {w}s")
+            time.sleep(w)
+            while True:
+                parse_all()
+                time.sleep(update_time)

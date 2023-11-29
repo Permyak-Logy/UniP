@@ -5,8 +5,6 @@ services:
     depends_on:
       - db
     command: python ./main.py
-    ports:
-      - 1234:1234
     networks:
       - mynet
   db:

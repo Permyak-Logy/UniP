@@ -1,3 +1,8 @@
+create table update_data
+(
+    last_update_timestamp integer not null
+);
+
 create table universities
 (
     name text not null,
@@ -28,7 +33,7 @@ create table group_types
 create table category_types
 (
     id   integer not null,
-    name text not null,
+    name text    not null,
     constraint category_types_pk
         primary key (id)
 );
@@ -96,6 +101,8 @@ create table requests
         foreign key ("user") references users
 );
 
+INSERT INTO update_data (last_update_timestamp)
+VALUES (0);
 
 INSERT INTO group_types (id, name)
 VALUES (0, 'Бюджет'),
