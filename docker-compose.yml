@@ -1,12 +1,5 @@
 version: "3"
 services:
-  parser:
-    build: parser/
-    depends_on:
-      - db
-    command: python ./main.py
-    networks:
-      - mynet
   db:
     image: postgres:latest
     user: postgres
@@ -15,7 +8,7 @@ services:
       POSTGRES_PASSWORD: "rooter"
       PGDATA: "/var/lib/postgresql/data/pgdata"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready", "-d", "postgres"]
+      test: CMD-SHELL pg_isready -d postgres
       interval: 10s
       timeout: 3s
       retries: 3
@@ -27,9 +20,27 @@ services:
     ports:
       - "5432:5432"
     networks:
-      - mynet
+      - unip_net
+
+  parser:
+    build: parser/
+    depends_on:
+      - db
+    networks:
+      - unip_net
+
+  backend:
+    build: backend
+    depends_on:
+      - db
+    ports:
+      - "5000:5000"
+    networks:
+      - unip_net
+
 volumes:
   postgres-data:
     driver: local
+
 networks:
-  mynet:
+  unip_net:

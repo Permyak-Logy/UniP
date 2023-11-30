@@ -8,3 +8,5 @@ RUN pip3 install -r requirements.txt
 
 ADD const.py .
 ADD main.py .
+
+CMD python ./main.py
