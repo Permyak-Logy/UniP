@@ -14,11 +14,12 @@ from selenium import webdriver
 from selenium.webdriver import ChromeOptions, ChromeService
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
+
 from const import *
 
 sys.stdout = sys.stderr  # TODO: Костыль чтобы логи в докере быстрее выводились
-URL_PSU = "http://www.psu.ru/files/docs/priem-2023/"
-URL_PSTU = "https://pstu.ru/enrollee/stat2023/pol2023/"
+URL_PSU = "http://www.psu.ru/files/docs/priem-2022/"
+URL_PSTU = "https://pstu.ru/enrollee/stat2022/pol2022/"
 TMP_PSTU = "pstu"
 
 
@@ -74,6 +75,9 @@ class Faculty:
 
     def __str__(self):
         return f"{RC}F{GR_C}({NC}{self.name}{GR_C}){NC}"
+
+    def __repr__(self):
+        return str(self)
 
     def add_direct(self, direct: "Direct"):
         self._directs.append(direct)
@@ -174,14 +178,23 @@ class Direct:
 
             self.group = group
             self.type = type_category
-            self.ctrl_number = Direct.Category.CtrlNumber(0, 0)
+            self._ctrl_number = Direct.Category.CtrlNumber(0, 0)
             CUR.execute(
                 f"""insert into categories(id, "group", type, ctrl_number) """
                 f"values ("
-                f"{self.id}, {self.group.id}, {Direct.Category.NAME2ID_TYPES[self.type]}, {self.ctrl_number.total}"
+                f"{self.id}, {self.group.id}, {Direct.Category.NAME2ID_TYPES[self.type]}, {self._ctrl_number.total}"
                 f") "
                 f"on conflict (id) do nothing"
             )
+
+        @property
+        def ctrl_number(self):
+            return self._ctrl_number
+
+        @ctrl_number.setter
+        def ctrl_number(self, value: "Direct.Category.CtrlNumber"):
+            self._ctrl_number = value
+            CUR.execute(f"UPDATE categories SET ctrl_number = {self._ctrl_number.total} WHERE id = {self.id}")
 
         def __str__(self):
             return f"{RC}C{NC}({self.type.name})"
@@ -361,7 +374,7 @@ def parse_psu():
     directs_data = html.fromstring(psu_data).xpath("//article")
 
     print("Парсим...")
-    for i, direct_data in enumerate(directs_data):
+    for direct_data in directs_data:
         # Парс
         level_form, fac_name, dir_name = list(map(lambda x: x.text, direct_data.find("h2").findall("span")))
         level, form = map(lambda x: x.strip("(").strip(")"), level_form.split(" "))
@@ -418,7 +431,7 @@ def parse_psu():
 
             if not table:
                 continue
-            titles_inner, category_name_inner, *reqs = table
+            titles_inner, *reqs = table
             titles = list(map(lambda x: x.find("strong").text, titles_inner.findall("td")))
             index_data = {
                 "rating": {
@@ -444,32 +457,31 @@ def parse_psu():
                 }
             }
             index_title = accept_indexes(index_data, titles)
-
-            category_name = category_name_inner.find("td").find("strong").text
-
-            if category_name == "Общий конкурс":
-                category = group[Direct.Category.Type.MAIN]
-            elif category_name == "Без экзаменов":
-                category = group[Direct.Category.Type.WEE]
-            elif category_name == "Особая квота":
-                category = group[Direct.Category.Type.SPECIAL]
-            elif category_name == "Специальная квота":
-                category = group[Direct.Category.Type.EXTRA]
-            elif "Целевая квота" in category_name:
-                category = group[Direct.Category.Type.TARGET]
-            else:
-                assert False, f"Неизвестная категория {repr(category_name)}"
-
-            for row in reqs:
+            category = None
+            for i, row in enumerate(reqs):
                 cols = row.findall("td")
+                if len(cols) == 1:
+                    category_name = row[0].find("strong").text
+                    if category_name == "Общий конкурс":
+                        category = group[Direct.Category.Type.MAIN]
+                    elif category_name == "Без экзаменов":
+                        category = group[Direct.Category.Type.WEE]
+                    elif category_name == "Особая квота":
+                        category = group[Direct.Category.Type.SPECIAL]
+                    elif category_name == "Специальная квота":
+                        category = group[Direct.Category.Type.EXTRA]
+                    elif "Целевая квота" in category_name:
+                        category = group[Direct.Category.Type.TARGET]
+                    else:
+                        assert False, f"Неизвестная категория {repr(category_name)}"
+                else:
+                    rating = int(cols[index_title["rating"]].text or 0)
+                    snils = cols[index_title["snils"]].find("font").text or ""
+                    original_doc = bool((cols[index_title["original_doc"]].text or '').strip())
+                    total_sum = int(cols[index_title["total_sum"]].text or 0)
 
-                rating = int(cols[index_title["rating"]].text or 0)
-                snils = cols[index_title["snils"]].find("font").text or ""
-                original_doc = bool(cols[index_title["original_doc"]].text)
-                total_sum = int(cols[index_title["total_sum"]].text or 0)
-
-                Request.add(rating, User.from_snils(snils), category,
-                            total_sum=total_sum, original_doc=original_doc)
+                    Request.add(rating, User.from_snils(snils), category,
+                                total_sum=total_sum, original_doc=original_doc)
 
     print(f"{psu} Готово!")
 
@@ -554,7 +566,8 @@ def parse_pstu():
                 "i": None,
                 "aliases": [
                     "Оригинал в вузе",
-                    "Вид документа"
+                    "Вид документа",
+                    "Вид документа об образовании"
                 ]
             }
         }
@@ -591,17 +604,20 @@ def parse_all():
 
 if __name__ == "__main__":
     wain_conn()
+    while True:
+        try:
+            with psycopg2.connect(host="db", database="postgres", user="postgres", password="rooter") as CONN:
+                with CONN.cursor() as CUR:
+                    CONN: psycopg2.extensions.connection
+                    CUR: psycopg2.extensions.cursor
 
-    with psycopg2.connect(host="db", database="postgres", user="postgres", password="rooter") as CONN:
-        with CONN.cursor() as CUR:
-            CONN: psycopg2.extensions.connection
-            CUR: psycopg2.extensions.cursor
-
-            CUR.execute("SELECT last_update_timestamp FROM update_data")
-            update_time = 12 * 60 * 60
-            w = max(0, int(update_time - (time.time() - CUR.fetchone()[0])))
-            print(f"Запущен! Следующее обновление через {w}s")
-            time.sleep(w)
-            while True:
-                parse_all()
-                time.sleep(update_time)
+                    CUR.execute("SELECT last_update_timestamp FROM update_data")
+                    update_time = 12 * 60 * 60
+                    w = max(0, int(update_time - (time.time() - CUR.fetchone()[0])))
+                    print(f"Запущен! Следующее обновление через {w}s")
+                    time.sleep(w)
+                    while True:
+                        parse_all()
+                        time.sleep(update_time)
+        except psycopg2.OperationalError:
+            time.sleep(1)
