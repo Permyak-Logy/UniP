@@ -350,7 +350,6 @@ def wain_conn():
             break
         except socket.error:
             time.sleep(0.1)
-    time.sleep(3)  # TODO: Заменить на реальную проверку на работоспособность бд
 
 
 def parse_psu():
