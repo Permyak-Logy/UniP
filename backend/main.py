@@ -1,10 +1,15 @@
-import psycopg2.extensions
-from collections import defaultdict
-from queries import *
 import json
-from flask import Flask, jsonify
+import logging
+import sys
+from collections import defaultdict
+
+import psycopg2.extensions
+from flask import Flask, Response
+
+from queries import *
 
 app = Flask(__name__)
+app.config['JSON_AS_ASCII'] = False
 
 
 @app.route('/ratings/<user>')
@@ -29,10 +34,13 @@ def ratings(user: str):
                 data[university][direct] = {
                     'real_rating': rating - consent_on_other - consent,
                     'consent': consent,
-                    'ctrl_number': ctrl_number
+                    'ctrl_number': ctrl_number,
+                    'competition': 'inf' if ctrl_number <= consent else round(
+                        (rating - consent_on_other - consent) / (ctrl_number - consent), 2)
                 }
-    return jsonify(data)
+    return Response(json.dumps(data, ensure_ascii=False), content_type="application/json; charset=utf-8")
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO, stream=sys.stdout)
+    app.run(host="0.0.0.0", port=80)

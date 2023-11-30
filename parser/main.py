@@ -1,11 +1,13 @@
 import asyncio
 import difflib
 import enum
+import logging
 import os
 import socket
+import sys
 import time
 from typing import Set, Optional
-import sys
+
 import aiohttp
 import psycopg2.extensions
 import requests
@@ -17,7 +19,6 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 from const import *
 
-sys.stdout = sys.stderr  # TODO: Костыль чтобы логи в докере быстрее выводились
 URL_PSU = "http://www.psu.ru/files/docs/priem-2022/"
 URL_PSTU = "https://pstu.ru/enrollee/stat2022/pol2022/"
 TMP_PSTU = "pstu"
@@ -194,7 +195,7 @@ class Direct:
         @ctrl_number.setter
         def ctrl_number(self, value: "Direct.Category.CtrlNumber"):
             self._ctrl_number = value
-            CUR.execute(f"UPDATE categories SET ctrl_number = {self._ctrl_number.total} WHERE id = {self.id}")
+            CUR.execute(f"UPDATE categories SET ctrl_number = {self._ctrl_number.has} WHERE id = {self.id}")
 
         def __str__(self):
             return f"{RC}C{NC}({self.type.name})"
@@ -316,7 +317,7 @@ class AsnycGrab(object):
                 await self.download(current_url.strip(), f"{TMP_PSTU}/pstu_data{str(index).rjust(4, '0')}.html")
                 self.downloaded.add(current_url)
             except Exception as e:
-                print(e, current_url)
+                logging.warning(f"{e} {current_url}")
 
     async def handle_progress(self):
         while True:
@@ -367,13 +368,13 @@ def wain_conn():
 
 def parse_psu():
     psu = University('ПГНИУ', 'Пермь')
-    print(f"Парсим {psu}")
+    logging.info(f"Парсим {psu}")
 
-    print(f"Скачиваем таблицы...")
+    logging.info(f"Скачиваем таблицы...")
     psu_data = requests.get(URL_PSU).content.decode('utf8')
     directs_data = html.fromstring(psu_data).xpath("//article")
 
-    print("Парсим...")
+    logging.info("Парсим...")
     for direct_data in directs_data:
         # Парс
         level_form, fac_name, dir_name = list(map(lambda x: x.text, direct_data.find("h2").findall("span")))
@@ -483,14 +484,14 @@ def parse_psu():
                     Request.add(rating, User.from_snils(snils), category,
                                 total_sum=total_sum, original_doc=original_doc)
 
-    print(f"{psu} Готово!")
+    logging.info(f"{psu} Готово!")
 
 
 def parse_pstu():
     pstu = University("ПНИПУ", "Пермь")
-    print(f"Парсим {pstu}")
+    logging.info(f"Парсим {pstu}")
 
-    print("Загружаем ссылки на таблицы...")
+    logging.info("Загружаем ссылки на таблицы...")
     options = ChromeOptions()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
@@ -500,7 +501,7 @@ def parse_pstu():
         main_elem = driver.find_element(By.CLASS_NAME, value="pol2013")
         links = list(map(lambda x: x.get_attribute("href"), main_elem.find_elements(By.XPATH, value=".//ul/li/a")))
 
-    print("Скачиваем таблицы...")
+    logging.info("Скачиваем таблицы...")
     async_example = AsnycGrab(links, 100)
     async_example.eventloop()
 
@@ -514,7 +515,7 @@ def parse_pstu():
         "Имеющие особое право": Direct.Category.Type.SPECIAL
     }
 
-    print("Парсим...")
+    logging.info("Парсим...")
     for i, filename in enumerate(filenames):
         if not filename.endswith(".html"):
             continue
@@ -587,11 +588,11 @@ def parse_pstu():
             Request.add(rating, User.from_snils(snils), category,
                         total_sum=total_sum, original_doc=original_doc)
 
-    print(f"{pstu} Готово!")
+    logging.info(f"{pstu} Готово!")
 
 
 def parse_all():
-    print("Парсинг начат...")
+    logging.info("Парсинг начат...")
     t = time.time()
     Request.reset()
     CONN.commit()
@@ -599,10 +600,12 @@ def parse_all():
     parse_pstu()
     CUR.execute(f"UPDATE update_data SET last_update_timestamp = {t}")
     CONN.commit()
-    print(f"Парсинг завершён за {time.time() - t}!")
+    logging.info(f"Парсинг завершён за {time.time() - t}!")
 
 
 if __name__ == "__main__":
+    logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO, stream=sys.stdout)
+
     wain_conn()
     while True:
         try:
@@ -614,7 +617,7 @@ if __name__ == "__main__":
                     CUR.execute("SELECT last_update_timestamp FROM update_data")
                     update_time = 12 * 60 * 60
                     w = max(0, int(update_time - (time.time() - CUR.fetchone()[0])))
-                    print(f"Запущен! Следующее обновление через {w}s")
+                    logging.info(f"Запущен! Следующее обновление через {w}s")
                     time.sleep(w)
                     while True:
                         parse_all()

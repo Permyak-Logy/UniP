@@ -34,7 +34,15 @@ services:
     depends_on:
       - db
     ports:
-      - "5000:5000"
+      - "5000:80"
+    networks:
+      - unip_net
+  frontend:
+    build: frontend
+    environment:
+      BOT_TOKEN: "6949424987:AAHMCBHGNEP0O-Dr9z-vTDSNsSiTZ7Yl5gk"
+    depends_on:
+      - db
     networks:
       - unip_net
 
