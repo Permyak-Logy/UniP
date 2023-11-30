@@ -179,11 +179,11 @@ class Direct:
 
             self.group = group
             self.type = type_category
-            self._ctrl_number = Direct.Category.CtrlNumber(0, 0)
+            self._ctrl_number: int = 0
             CUR.execute(
                 f"""insert into categories(id, "group", type, ctrl_number) """
                 f"values ("
-                f"{self.id}, {self.group.id}, {Direct.Category.NAME2ID_TYPES[self.type]}, {self._ctrl_number.total}"
+                f"{self.id}, {self.group.id}, {Direct.Category.NAME2ID_TYPES[self.type]}, {self._ctrl_number}"
                 f") "
                 f"on conflict (id) do nothing"
             )
@@ -193,9 +193,10 @@ class Direct:
             return self._ctrl_number
 
         @ctrl_number.setter
-        def ctrl_number(self, value: "Direct.Category.CtrlNumber"):
+        def ctrl_number(self, value: int):
+            assert isinstance(value, int), "Error!"
             self._ctrl_number = value
-            CUR.execute(f"UPDATE categories SET ctrl_number = {self._ctrl_number.has} WHERE id = {self.id}")
+            CUR.execute(f"UPDATE categories SET ctrl_number = {self._ctrl_number} WHERE id = {self.id}")
 
         def __str__(self):
             return f"{RC}C{NC}({self.type.name})"
@@ -351,7 +352,7 @@ def accept_indexes(index_data: dict, titles):
                 to_find_title.remove(check_title)
                 break
 
-    # assert not (to_find_title - {"total_sum"}), f"Не найдены колонки {to_find_title} среди {titles}"
+    assert not (to_find_title - {"total_sum"}), f"Не найдены колонки {to_find_title} среди {titles}"
     return indexes
 
 
@@ -405,16 +406,16 @@ def parse_psu():
             if group_name == "Бюджетные места":
                 main_ctrl_number = Direct.Category.CtrlNumber(*numbers_data.pop(0))
                 group = direct[Direct.Group.Type.BUDGET]
-                group[Direct.Category.Type.MAIN].ctrl_number = main_ctrl_number
+                group[Direct.Category.Type.MAIN].ctrl_number = main_ctrl_number.has
                 if numbers_data and not numbers_data[0]:
                     numbers_data.pop(0)
                     for category_name, ctrl_number in sub_numbers_data.pop(0):
                         if category_name == 'Квота приёма лиц, имеющих особые права':
-                            direct[Direct.Group.Type.BUDGET][Direct.Category.Type.SPECIAL].ctrl_number = ctrl_number
+                            direct[Direct.Group.Type.BUDGET][Direct.Category.Type.SPECIAL].ctrl_number = ctrl_number.has
                         elif category_name == 'Квота приёма на целевое обучение':
-                            direct[Direct.Group.Type.BUDGET][Direct.Category.Type.TARGET].ctrl_number = ctrl_number
+                            direct[Direct.Group.Type.BUDGET][Direct.Category.Type.TARGET].ctrl_number = ctrl_number.has
                         elif category_name == 'Специальная квота':
-                            direct[Direct.Group.Type.BUDGET][Direct.Category.Type.EXTRA].ctrl_number = ctrl_number
+                            direct[Direct.Group.Type.BUDGET][Direct.Category.Type.EXTRA].ctrl_number = ctrl_number.has
                         else:
                             assert False, f"Неизвестная квота {repr(category_name)}"
                         main_ctrl_number.remove(ctrl_number)
@@ -422,11 +423,12 @@ def parse_psu():
                 numbers = numbers_data.pop(0)
                 main_ctrl_number = Direct.Category.CtrlNumber(*numbers[:2])
                 group = direct[Direct.Group.Type.CONTRACT]
-                group[Direct.Category.Type.MAIN].ctrl_number = main_ctrl_number
+                group[Direct.Category.Type.MAIN].ctrl_number = main_ctrl_number.has
                 if len(numbers) == 5:
                     foreign_ctrl_number = Direct.Category.CtrlNumber(*numbers[3:])
                     main_ctrl_number.remove(foreign_ctrl_number)
-                    direct[Direct.Group.Type.CONTRACT][Direct.Category.Type.FOREIGN].ctrl_number = foreign_ctrl_number
+                    direct[Direct.Group.Type.CONTRACT][
+                        Direct.Category.Type.FOREIGN].ctrl_number = foreign_ctrl_number.has
             else:
                 assert False, f"Неизвестная группа {repr(group_name).encode().decode('utf8')} {faculty} {direct}"
 
@@ -545,13 +547,14 @@ def parse_pstu():
         else:
             group = direct[group_aliases[group_name]]
             category = group[category_aliases[category_name]]
-        category.ctrl_number = ctrl_number
+        category.ctrl_number = ctrl_number.total
 
         index_data = {
             "rating": {
                 "i": None,
                 "aliases": [
-                    "№"
+                    "№",
+                    "Номер ПП"
                 ]
             }, "snils": {
                 "i": None,
@@ -577,7 +580,7 @@ def parse_pstu():
 
         for req_data in reqs:
             cols = req_data.findall("td")
-            rating = int(cols[index_title["rating"]].text) if index_title["rating"] is not None else 0
+            rating = int(cols[index_title["rating"]].text)
             snils = cols[index_title["snils"]].text
             total_sum = int(cols[index_title["total_sum"]].text) if index_title["total_sum"] is not None else 0
             original_doc = difflib.SequenceMatcher(
