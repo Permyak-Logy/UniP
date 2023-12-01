@@ -3,6 +3,7 @@ services:
   db:
     image: postgres:latest
     user: postgres
+    restart: always
     environment:
       POSTGRES_DB: "postgres"
       POSTGRES_PASSWORD: "rooter"
@@ -19,6 +20,7 @@ services:
 
   parser:
     build: parser/
+    restart: always
     depends_on:
       - db
     networks:
@@ -26,14 +28,17 @@ services:
 
   backend:
     build: backend
+    restart: always
     depends_on:
       - db
     ports:
       - "5000:80"
     networks:
       - unip_net
+
   frontend:
     build: frontend
+    restart: always
     environment:
       BOT_TOKEN: "6949424987:AAHMCBHGNEP0O-Dr9z-vTDSNsSiTZ7Yl5gk"
     depends_on:

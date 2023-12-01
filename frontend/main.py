@@ -3,7 +3,7 @@ import logging
 import sys
 from os import getenv
 
-from aiogram import Bot, Dispatcher, Router, types
+from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
 from aiogram.types import Message
@@ -27,6 +27,9 @@ async def echo_handler(message: types.Message) -> None:
         user = message.text.strip().replace(' ', '').replace('-', '')
         data = requests.get(
             f"http://backend:80/ratings/{user}").json()
+        if not data:
+            await message.answer(f"Данные о '{user}' небыли найдены. Проверьте СНИЛС и/или попробуйте позднее...")
+            return
         for uni, dirs in data.items():
             await message.answer(hbold(f"{uni} ({user})") + "\n" + "\n\n".join(
                 f"{hbold(direct)}:"
