@@ -17,6 +17,6 @@ WORKDIR /opt/parser
 ADD requirements.txt .
 RUN pip3 install -r requirements.txt
 
-ADD *.py .
+ADD main.py .
 
 CMD python ./main.py
