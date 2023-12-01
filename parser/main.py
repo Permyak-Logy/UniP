@@ -369,13 +369,13 @@ def wain_conn():
 
 def parse_psu():
     psu = University('ПГНИУ', 'Пермь')
-    logging.info(f"Парсим {psu}")
+    logging.info(f"Parsing PSU")
 
-    logging.info(f"Скачиваем таблицы...")
+    logging.info(f"Download tables")
     psu_data = requests.get(URL_PSU).content.decode('utf8')
     directs_data = html.fromstring(psu_data).xpath("//article")
 
-    logging.info("Парсим...")
+    logging.info("Parse")
     for direct_data in directs_data:
         # Парс
         level_form, fac_name, dir_name = list(map(lambda x: x.text, direct_data.find("h2").findall("span")))
@@ -486,14 +486,14 @@ def parse_psu():
                     Request.add(rating, User.from_snils(snils), category,
                                 total_sum=total_sum, original_doc=original_doc)
 
-    logging.info(f"{psu} Готово!")
+    logging.info(f"PSU ready!")
 
 
 def parse_pstu():
     pstu = University("ПНИПУ", "Пермь")
-    logging.info(f"Парсим {pstu}")
+    logging.info(f"Parse PSTU")
 
-    logging.info("Загружаем ссылки на таблицы...")
+    logging.info("Download links")
     options = ChromeOptions()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
@@ -503,7 +503,7 @@ def parse_pstu():
         main_elem = driver.find_element(By.CLASS_NAME, value="pol2013")
         links = list(map(lambda x: x.get_attribute("href"), main_elem.find_elements(By.XPATH, value=".//ul/li/a")))
 
-    logging.info("Скачиваем таблицы...")
+    logging.info("Download tables")
     async_example = AsnycGrab(links, 100)
     async_example.eventloop()
 
@@ -517,7 +517,7 @@ def parse_pstu():
         "Имеющие особое право": Direct.Category.Type.SPECIAL
     }
 
-    logging.info("Парсим...")
+    logging.info("Parse")
     for i, filename in enumerate(filenames):
         if not filename.endswith(".html"):
             continue
@@ -591,11 +591,11 @@ def parse_pstu():
             Request.add(rating, User.from_snils(snils), category,
                         total_sum=total_sum, original_doc=original_doc)
 
-    logging.info(f"{pstu} Готово!")
+    logging.info(f"PSTU ready!")
 
 
 def parse_all():
-    logging.info("Парсинг начат...")
+    logging.info("Parsing started...")
     t = time.time()
     Request.reset()
     CONN.commit()
@@ -603,7 +603,7 @@ def parse_all():
     parse_pstu()
     CUR.execute(f"UPDATE update_data SET last_update_timestamp = {t}")
     CONN.commit()
-    logging.info(f"Парсинг завершён за {time.time() - t}!")
+    logging.info(f"Parsing completed at {time.time() - t}s")
 
 
 if __name__ == "__main__":
@@ -620,7 +620,7 @@ if __name__ == "__main__":
                     CUR.execute("SELECT last_update_timestamp FROM update_data")
                     update_time = 12 * 60 * 60
                     w = max(0, int(update_time - (time.time() - CUR.fetchone()[0])))
-                    logging.info(f"Запущен! Следующее обновление через {w}s")
+                    logging.info(f"Started! Next update after {w}s")
                     time.sleep(w)
                     while True:
                         parse_all()
