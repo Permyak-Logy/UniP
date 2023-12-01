@@ -23,6 +23,8 @@ services:
     restart: always
     depends_on:
       - db
+    environment:
+      PARSE_YEAR: "2022"
     networks:
       - unip_net
 

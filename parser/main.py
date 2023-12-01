@@ -19,8 +19,10 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 from const import *
 
-URL_PSU = "http://www.psu.ru/files/docs/priem-2022/"
-URL_PSTU = "https://pstu.ru/enrollee/stat2022/pol2022/"
+YEAR = os.getenv("PARSE_YEAR")
+
+URL_PSU = f"http://www.psu.ru/files/docs/priem-{YEAR}/"
+URL_PSTU = f"https://pstu.ru/enrollee/stat{YEAR}/pol{YEAR}/"
 TMP_PSTU = "pstu"
 
 
