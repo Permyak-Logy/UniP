@@ -6,7 +6,7 @@ import os
 import socket
 import sys
 import time
-from typing import Set, Optional
+from typing import Set
 
 import aiohttp
 import psycopg2.extensions
@@ -142,6 +142,10 @@ class Direct:
                 self.total = total
                 self.has = has
                 assert total >= has
+
+            def remove(self, other: "Direct.Category.CtrlNumber"):
+                self.has -= other.has
+                self.total -= other.total
 
         def __init__(self, group: "Direct.Group", type_category: "Direct.Category.Type"):
             self.id = Direct.Category._count
@@ -368,7 +372,6 @@ def parse_psu():
             if group_name == "Бюджетные места":
                 main_ctrl_number = Direct.Category.CtrlNumber(*numbers_data.pop(0))
                 group = direct[Direct.Group.Type.BUDGET]
-                group[Direct.Category.Type.MAIN].ctrl_number = main_ctrl_number.has
                 if numbers_data and not numbers_data[0]:
                     numbers_data.pop(0)
                     for category_name, ctrl_number in sub_numbers_data.pop(0):
@@ -381,16 +384,19 @@ def parse_psu():
                         else:
                             assert False, f"Неизвестная квота {repr(category_name)}"
                         main_ctrl_number.remove(ctrl_number)
+                group[Direct.Category.Type.MAIN].ctrl_number = main_ctrl_number.has
+
             elif group_name == "По договорам":
                 numbers = numbers_data.pop(0)
                 main_ctrl_number = Direct.Category.CtrlNumber(*numbers[:2])
                 group = direct[Direct.Group.Type.CONTRACT]
-                group[Direct.Category.Type.MAIN].ctrl_number = main_ctrl_number.has
                 if len(numbers) == 5:
                     foreign_ctrl_number = Direct.Category.CtrlNumber(*numbers[3:])
                     main_ctrl_number.remove(foreign_ctrl_number)
                     direct[Direct.Group.Type.CONTRACT][
                         Direct.Category.Type.FOREIGN].ctrl_number = foreign_ctrl_number.has
+
+                group[Direct.Category.Type.MAIN].ctrl_number = main_ctrl_number.has
             else:
                 assert False, f"Неизвестная группа {repr(group_name).encode().decode('utf8')} {faculty} {direct}"
 
