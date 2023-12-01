@@ -6,7 +6,6 @@ WORKDIR /opt/backend
 ADD requirements.txt .
 RUN pip3 install -r requirements.txt
 
-ADD queries.py .
-ADD main.py .
+ADD *.py .
 
 CMD python ./main.py
