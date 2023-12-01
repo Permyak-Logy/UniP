@@ -17,8 +17,6 @@ from selenium.webdriver import ChromeOptions, ChromeService
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
-from const import *
-
 YEAR = os.getenv("PARSE_YEAR")
 
 URL_PSU = f"http://www.psu.ru/files/docs/priem-{YEAR}/"
@@ -42,19 +40,8 @@ class University:
         self._faculties: list[Faculty] = []
         University.ALL.append(self)
 
-    def __str__(self):
-        return f"{RC}U{BL_C}({NC}{self.name} г.{self.city}{BL_C}){NC}"
-
     def add_faculty(self, faculty: "Faculty"):
         self._faculties.append(faculty)
-
-    def find_d(self, name) -> Optional["Direct"]:
-        f = (None, 0)
-        for faculty in self._faculties:
-            for direct in faculty._directs:
-                r = difflib.SequenceMatcher(None, direct.fullname(), name).ratio()
-                f = max(f, (direct, r), key=lambda x: x[1])
-        return f[0]
 
 
 class Faculty:
@@ -75,12 +62,6 @@ class Faculty:
 
         self.uni.add_faculty(self)
         self._directs = []
-
-    def __str__(self):
-        return f"{RC}F{GR_C}({NC}{self.name}{GR_C}){NC}"
-
-    def __repr__(self):
-        return str(self)
 
     def add_direct(self, direct: "Direct"):
         self._directs.append(direct)
@@ -125,9 +106,6 @@ class Direct:
 
             self._categories: Set["Direct.Category"] = set()
 
-        def __str__(self):
-            return f"{RC}G{NC}({self.type.name})"
-
         def __getitem__(self, category_type: "Direct.Category.Type") -> "Direct.Category":
             for category in self._categories:
                 if category.type == category_type:
@@ -165,16 +143,6 @@ class Direct:
                 self.has = has
                 assert total >= has
 
-            def __str__(self):
-                return f"{RC}CN{NC}({BC}{self.has}{NC}/{BC}{self.total}{NC})"
-
-            def __repr__(self):
-                return str(self)
-
-            def remove(self, other: "Direct.Category.CtrlNumber"):
-                self.has -= other.has
-                self.total -= other.total
-
         def __init__(self, group: "Direct.Group", type_category: "Direct.Category.Type"):
             self.id = Direct.Category._count
             Direct.Category._count += 1
@@ -200,9 +168,6 @@ class Direct:
             self._ctrl_number = value
             CUR.execute(f"UPDATE categories SET ctrl_number = {self._ctrl_number} WHERE id = {self.id}")
 
-        def __str__(self):
-            return f"{RC}C{NC}({self.type.name})"
-
         def __hash__(self):
             return hash(self.type)
 
@@ -224,9 +189,6 @@ class Direct:
         )
 
         self.faculty.add_direct(self)
-
-    def __str__(self):
-        return f"{RC}D{NC}({self.name})"
 
     def __getitem__(self, group_type: "Direct.Group.Type") -> "Direct.Group":
         for group in self._groups:
@@ -263,9 +225,6 @@ class User:
         self.requests: Set["Request"] = set()
         User.ALL.add(self)
 
-    def __str__(self):
-        return f"{RC}S{NC}({GC}{self.name or self.snils}{NC})"
-
     def __hash__(self):
         return hash("Student:" + self.snils)
 
@@ -298,6 +257,7 @@ class Request:
 
 
 class AsnycGrab(object):
+    """Вспомогательный класс позволяющий быстро загрузить все таблицы ПНИПУ"""
 
     def __init__(self, url_list, max_threads):
         self.urls = url_list
