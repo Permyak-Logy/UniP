@@ -32,11 +32,11 @@ async def echo_handler(message: types.Message) -> None:
             return
         for uni, dirs in data.items():
             await message.answer(hbold(f"{uni} ({user})") + "\n" + "\n\n".join(
-                f"{hbold(direct)}:"
+                f"{hbold(info['direct'])}:"
                 f"\n\t\t\tРейтинг={hcode(info['real_rating'])}"
                 f"\n\t\t\tСогласия={hcode(info['consent'])}/{hcode(info['ctrl_number'])}"
                 f"\n\t\t\tЛюдей на место={hcode(info['competition'])}"
-                for direct, info in dirs.items()))
+                for category_id, info in dirs.items()))
     except Exception as E:
         logging.warning(str(type(E)) + ":" + str(E))
 

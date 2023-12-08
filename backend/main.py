@@ -24,14 +24,15 @@ def ratings(user: str):
 
             data = defaultdict(dict)
 
-            for university, direct, rating, category_id, ctrl_number in my_dirs:
+            for university, direct, rating, category_id, ctrl_number, form in my_dirs:
                 cur.execute(SELECT_COUNT_USERS_CONSENT_ON_OTHER_DIRECTS,
                             vars={'category': category_id, 'rating': rating})
                 consent_on_other = cur.fetchone()[0]
 
                 cur.execute(SELECT_COUNT_USERS_CONSENT_ON_DIRECT, vars={'category': category_id, 'rating': rating})
                 consent = cur.fetchone()[0]
-                data[university][direct] = {
+                data[university][category_id] = {
+                    'direct': f"({form}) {direct}",
                     'real_rating': rating - consent_on_other - consent,
                     'consent': consent,
                     'ctrl_number': ctrl_number,

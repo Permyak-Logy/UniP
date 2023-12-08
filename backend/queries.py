@@ -1,4 +1,4 @@
-SELECT_DIRECTS_USER = '''SELECT u.name, d.name, requests.rating, c.id, c.ctrl_number
+SELECT_DIRECTS_USER = '''SELECT u.name, d.name, requests.rating, c.id, c.ctrl_number, d.form
 FROM requests
          JOIN categories c ON c.id = requests.category
          JOIN groups g ON g.id = c."group"
