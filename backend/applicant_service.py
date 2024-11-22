@@ -1,9 +1,6 @@
 from collections import defaultdict
-
+from applicant_repository import select_groups_user, select_consent_users, select_count_users_consent_on_direct, select_count_user_consent_on_other_directs, select_ctrl_number, select_current_passing_score
 import psycopg2.extensions
-
-from queries import *
-
 
 def calculate_statistic_direct(rating: int, consent: int, consent_on_other: int, ctrl_number: int):
     return {
@@ -19,20 +16,15 @@ def get_user_real_rating(user: str, cur: psycopg2.extensions.cursor) -> dict:
     data = defaultdict(dict)
 
     for group in get_user_groups(user, cur):
-        cur.execute(SELECT_COUNT_USERS_CONSENT_ON_OTHER_DIRECTS,
-                    vars={'groupid': group["group_id"], 'usr': user})
-        consent_on_other = cur.fetchone()[0]
-
-        cur.execute(SELECT_COUNT_USERS_CONSENT_ON_DIRECT, vars={'groupid': group["group_id"], 'usr': user})
-        consent = cur.fetchone()[0]
+        consent_on_other = select_count_user_consent_on_other_directs(user, group["group_id"], cur)
+        consent = select_count_users_consent_on_direct(user, group["group_id"], cur)
         stats = calculate_statistic_direct(group["rating"], consent, consent_on_other, group["ctrl_number"])
         data[group["university"]][group["group_id"]] = {**group, **stats}
     return data
 
 
 def get_user_groups(user: str, cur: psycopg2.extensions.cursor) -> list[dict]:
-    cur.execute(SELECT_GROUPS_USER, vars={"usr": user})
-    my_groups = cur.fetchall()
+    my_groups = select_groups_user(user, cur)
 
     return [{
         "name": f"{faculty} ({form} {group_type}) {name}",
@@ -45,12 +37,8 @@ def get_user_groups(user: str, cur: psycopg2.extensions.cursor) -> list[dict]:
 
 
 def get_current_passing_score(direct: int, group: str, category: str, cur: psycopg2.extensions.cursor) -> int:
-
-    cur.execute(SELECT_CONSENT_USERS, vars={"direct": direct, "group": group, "category": category})
-    users = cur.fetchall()
-
-    cur.execute(SELECT_CTRL_NUMBER, vars={"direct": direct, "group": group, "category": category})
-    ctrl_number = cur.fetchone()[0]
+    users = select_consent_users(direct, group, category, cur)
+    ctrl_number = select_ctrl_number(direct, group, category, cur)
     if len(users) >= ctrl_number:
         return users[ctrl_number - 1][0]
     return -1
