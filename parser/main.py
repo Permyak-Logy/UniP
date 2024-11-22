@@ -6,7 +6,6 @@ import os
 import socket
 import sys
 import time
-from typing import Set
 
 import aiohttp
 import psycopg2.extensions
@@ -17,216 +16,125 @@ from selenium.webdriver import ChromeOptions, ChromeService
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
-YEAR = os.getenv("PARSE_YEAR")
+YEAR = 2024  # os.getenv("PARSE_YEAR")
 
 URL_PSU = f"http://www.psu.ru/files/docs/priem-{YEAR}/"
 URL_PSTU = f"https://pstu.ru/enrollee/stat{YEAR}/pol{YEAR}/"
 TMP_PSTU = "pstu"
 
 
-class University:
-    ALL: list["University"] = []
-
-    def __init__(self, name: str, city: str):
-        self.name = name
-        self.city = city
-
-        CUR.execute(
-            f"insert into universities (name, city) "
-            f"values ({repr(name)}, {repr(city)}) "
-            f"on conflict (name) do nothing"
-        )
-
-        self._faculties: list[Faculty] = []
-        University.ALL.append(self)
-
-    def add_faculty(self, faculty: "Faculty"):
-        self._faculties.append(faculty)
-
-
-class Faculty:
-    _count = 0
-
-    def __init__(self, university: "University", name: str):
-        self.id = Faculty._count
-        Faculty._count += 1
-
-        self.uni = university
-        self.name = name
-
-        CUR.execute(
-            f"insert into faculties(id, university, name) "
-            f"values ({self.id}, {repr(self.uni.name)}, {repr(self.name)}) "
-            f"on conflict (id) do nothing"
-        )
-
-        self.uni.add_faculty(self)
-        self._directs = []
-
-    def add_direct(self, direct: "Direct"):
-        self._directs.append(direct)
-
-    @classmethod
-    def from_name_and_uni(cls, university: "University", name: str):
-        for faculty in university._faculties:
-            if faculty.name == name:
-                return faculty
-        return cls(university, name)
-
-
 class Direct:
     _count = 0
 
-    class Group:
-        _count = 0
+    class Form:
+        IN_P = "Очно"
+        IN_A = "Заочно"
+        IN_PA = "Очно/Заочно"
 
-        class Type(enum.Enum):
-            BUDGET = "Бюджет"
-            CONTRACT = "Договор"
-            TARGET = "Целевое"
+    class Level:
+        BACHELOR = "Бакалавриат"
+        MASTER = "Магистратура"
+        GRADUATE = "Асперантура"
+        SPECIALITY = "Специалитет"
 
-        NAME2ID_TYPES = {
-            Type.BUDGET: 0,
-            Type.CONTRACT: 1,
-            Type.TARGET: 2
-        }
-
-        def __init__(self, direct: "Direct", type_group: "Direct.Group.Type"):
-            self.id = Direct.Group._count
-            Direct.Group._count += 1
-
-            self.direct = direct
-            self.type = type_group
-
-            CUR.execute(
-                f"insert into groups(id, direct, type) "
-                f"values ({self.id}, {self.direct.id}, {Direct.Group.NAME2ID_TYPES[self.type]}) "
-                f"on conflict (id) do nothing"
-            )
-
-            self._categories: Set["Direct.Category"] = set()
-
-        def __getitem__(self, category_type: "Direct.Category.Type") -> "Direct.Category":
-            for category in self._categories:
-                if category.type == category_type:
-                    return category
-            category = Direct.Category(self, category_type)
-            self._categories.add(category)
-            return category
-
-        def __hash__(self):
-            return hash(self.type)
-
-    class Category:
-        _count = 0
-
-        class Type(enum.Enum):
-            MAIN = "Общий конкурс"
-            SPECIAL = "Особое право"
-            EXTRA = "Специальная квота"
-            WEE = "БВИ"
-            FOREIGN = "Иностранцы"
-            TARGET = "Целевое"
-
-        NAME2ID_TYPES = {
-            Type.MAIN: 0,
-            Type.SPECIAL: 1,
-            Type.EXTRA: 2,
-            Type.WEE: 3,
-            Type.FOREIGN: 4,
-            Type.TARGET: 5
-        }
-
-        class CtrlNumber:
-            def __init__(self, total: int, has: int):
-                self.total = total
-                self.has = has
-                assert total >= has
-
-            def remove(self, other: "Direct.Category.CtrlNumber"):
-                self.has -= other.has
-                self.total -= other.total
-
-        def __init__(self, group: "Direct.Group", type_category: "Direct.Category.Type"):
-            self.id = Direct.Category._count
-            Direct.Category._count += 1
-
-            self.group = group
-            self.type = type_category
-            self._ctrl_number: int = 0
-            CUR.execute(
-                f"""insert into categories(id, "group", type, ctrl_number) """
-                f"values ("
-                f"{self.id}, {self.group.id}, {Direct.Category.NAME2ID_TYPES[self.type]}, {self._ctrl_number}"
-                f") "
-                f"on conflict (id) do nothing"
-            )
-
-        @property
-        def ctrl_number(self):
-            return self._ctrl_number
-
-        @ctrl_number.setter
-        def ctrl_number(self, value: int):
-            assert isinstance(value, int), "Error!"
-            self._ctrl_number = value
-            CUR.execute(f"UPDATE categories SET ctrl_number = {self._ctrl_number} WHERE id = {self.id}")
-
-        def __hash__(self):
-            return hash(self.type)
-
-    def __init__(self, faculty: "Faculty", name: str, form: str, level: str):
-        self.id = Direct._count
+    def __init__(self, *, university: str, faculty: str, code: str, name: str, form: str, level: str):
         Direct._count += 1
 
+        self.id = Direct._count
+        self.uni = university
         self.faculty = faculty
-
+        self.code = code
         self.name = name
         self.form = form
         self.level = level
-        self._groups: Set["Direct.Group"] = set()
+
+        self._groups: set["Group"] = set()
 
         CUR.execute(
-            f"insert into directs(id, name, form, level, faculty) "
-            f"values ({self.id}, {repr(self.name)}, {repr(self.form)}, {repr(self.level)}, {self.faculty.id}) "
+            f"insert into directs(university, faculty, code, name, form, level, id) "
+            f"values ('{self.uni}', '{self.faculty}', '{self.code}', "
+            f"'{self.name}', '{self.form}', '{self.level}', {self.id})"
             f"on conflict (id) do nothing"
         )
 
-        self.faculty.add_direct(self)
+    def __getitem__(self, key: tuple["Group.GroupType", "Group.CategoryType"]) -> "Group":
+        group_type, category_type = key
 
-    def __getitem__(self, group_type: "Direct.Group.Type") -> "Direct.Group":
         for group in self._groups:
-            if group.type == group_type:
-                return group
-        group = Direct.Group(self, group_type)
+            if group.group_type != group_type:
+                continue
+            if group.category_type != category_type:
+                continue
+            return group
+
+        group = Group(direct=self, group_type=group_type, category_type=category_type, ctrl_number=1)
         self._groups.add(group)
         return group
 
     def __hash__(self):
         return hash(str(self))
 
-    @classmethod
-    def from_name_and_fac(cls, faculty: "Faculty", name: str, form: str, level: str):
-        for direct in faculty._directs:
-            if direct.name == name and direct.form == form and direct.level == level:
-                return direct
-        return cls(faculty, name, form, level)
+
+class Group:
+    _count = 0
+
+    class GroupType(enum.Enum):
+        BUDGET = "Бюджет"
+        CONTRACT = "Договор"
+        TARGET = "Целевое"
+
+    class CategoryType(enum.Enum):
+        MAIN = "Общий конкурс"
+        SPECIAL = "Особое право"
+        EXTRA = "Специальная квота"
+        WEE = "БВИ"
+        FOREIGN = "Иностранцы"
+        TARGET = "Целевое"
+
+    def __init__(self, *, direct: "Direct", group_type: "Group.GroupType", category_type: "Group.CategoryType",
+                 ctrl_number: int):
+        Group._count += 1
+
+        self.id = Group._count
+        self.direct = direct
+        self.group_type = group_type
+        self.category_type = category_type
+        self._ctrl_number = ctrl_number
+
+        CUR.execute(
+            f"insert into groups(id, direct, group_type, category_type, ctrl_number) "
+            f"values ({self.id}, {self.direct.id}, {self.group_type}, {self.category_type}, {self._ctrl_number}) "
+            f"on conflict (id) do nothing"
+        )
+
+        self._requests: set["Request"] = set()
+
+    @property
+    def ctrl_number(self):
+        return self._ctrl_number
+
+    @ctrl_number.setter
+    def ctrl_number(self, val):
+        self._ctrl_number = val
+        CUR.execute(f"update groups set ctrl_number={self._ctrl_number} where id={self.id}")
+
+    def __hash__(self):
+        return hash(f"{self.id}")
 
 
 class User:
-    ALL: Set["User"] = set()
+    ALL: set["User"] = set()
 
     def __init__(self, snils: str):
         self.snils = snils.replace("-", "").replace(" ", "")
-        self.name = None
 
         CUR.execute(
-            f"""insert into users(id)"""
-            f"values ({repr(self.snils)})"
-            f"on conflict (id) do nothing "
+            f"insert into users(snils) "
+            f"values ('{self.snils}')"
+            f"on conflict (snils) do nothing "
         )
 
-        self.requests: Set["Request"] = set()
+        self.requests: set["Request"] = set()
         User.ALL.add(self)
 
     def __hash__(self):
@@ -245,18 +153,16 @@ class Request:
     _count = 0
 
     @staticmethod
-    def add(rating: int, user: "User", category: "Direct.Category", original_doc: bool, total_sum: int = 0):
+    def add(group: "Group", user: "User", rating: int, total_sum: int, original_doc: bool, priority: int = 1):
         CUR.execute(
-            f"""insert into requests(id, rating, "user", category, total_sum, original_doc)"""
-            f"values ("
-            f"{Request._count}, {rating}, {repr(user.snils)}, {category.id}, {total_sum}, {original_doc}"
-            f")"
+            f"insert into requests(group_id, \"user\", rating, total_sum, original_doc, year, priority)"
+            f"values ({group.id}, '{user.snils}', {rating}, {total_sum}, {original_doc}, {YEAR}, {priority})"
         )
         Request._count += 1
 
     @staticmethod
     def reset():
-        CUR.execute("delete from requests")
+        CUR.execute("truncate table requests")
         Request._count = 0
 
 
@@ -304,6 +210,19 @@ class AsnycGrab(object):
         loop.run_until_complete(asyncio.wait(tasks))
 
 
+class Parser:
+    def parse_applicant_list(self, url) -> list:
+        pass
+
+    def save_to_db(self):
+        pass
+
+
+class PSUParser(Parser):
+    def parse_applicant_list(self, url):
+        pass
+
+
 def accept_indexes(index_data: dict, titles):
     to_find_title = set(index_data.keys())
     indexes = {key: None for key in index_data.keys()}
@@ -334,7 +253,8 @@ def wain_conn():
 
 
 def parse_psu():
-    psu = University('ПГНИУ', 'Пермь')
+    uni = 'ПГНИУ'
+
     logging.info(f"Parsing PSU")
 
     logging.info(f"Download tables")
@@ -344,7 +264,7 @@ def parse_psu():
     logging.info("Parse")
     for direct_data in directs_data:
         # Парс
-        level_form, fac_name, dir_name = list(map(lambda x: x.text, direct_data.find("h2").findall("span")))
+        level_form, faculty, dir_name = list(map(lambda x: x.text, direct_data.find("h2").findall("span")))
         level, form = map(lambda x: x.strip("(").strip(")"), level_form.split(" "))
         group_names = list(map(lambda x: x.text, direct_data.findall("h3")))
         tables = list(map(lambda x: x.findall("tr"), direct_data.findall("table")))
@@ -353,14 +273,12 @@ def parse_psu():
 
         sub_numbers_data = list(map(
             lambda x: list(map(
-                lambda y: (y.text.strip()[:-1], Direct.Category.CtrlNumber(
+                lambda y: (y.text.strip()[:-1], Direct.CtrlNumber(
                     *list(map(lambda z: int(z.text), y.findall("strong"))))),
                 x.findall("li"))),
             direct_data.findall("ul")))
 
-        # Добавление факультета и направления
-        faculty = Faculty.from_name_and_uni(psu, fac_name)
-        direct = Direct.from_name_and_fac(faculty, dir_name, form, level)
+        direct = Direct(university=uni, faculty=faculty, code="0.0.0", name=dir_name, form=form, level=level)
 
         # Добавление недостающих списков для таблиц
         while len(group_names) > len(tables):
@@ -457,119 +375,13 @@ def parse_psu():
     logging.info(f"PSU ready!")
 
 
-def parse_pstu():
-    pstu = University("ПНИПУ", "Пермь")
-    logging.info(f"Parse PSTU")
-
-    logging.info("Download links")
-    options = ChromeOptions()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    with webdriver.Firefox(service=ChromeService(ChromeDriverManager().install()), options=options) as driver:
-        driver.get(URL_PSTU)
-        main_elem = driver.find_element(By.CLASS_NAME, value="pol2013")
-        links = list(map(lambda x: x.get_attribute("href"), main_elem.find_elements(By.XPATH, value=".//ul/li/a")))
-
-    logging.info("Download tables")
-    async_example = AsnycGrab(links, 100)
-    async_example.eventloop()
-
-    filenames = os.listdir("pstu")
-    group_aliases = {
-        "Бюджетная основа": Direct.Group.Type.BUDGET,
-        "Полное возмещение затрат": Direct.Group.Type.CONTRACT
-    }
-    category_aliases = {
-        "На общих основаниях": Direct.Category.Type.MAIN,
-        "Имеющие особое право": Direct.Category.Type.SPECIAL
-    }
-
-    logging.info("Parse")
-    for i, filename in enumerate(filenames):
-        if not filename.endswith(".html"):
-            continue
-
-        with open(f"{TMP_PSTU}/{filename}", encoding="utf8") as file:
-            pstu_data = file.read()
-
-        direct_data = html.fromstring(pstu_data).xpath("//tr")
-        form = direct_data[3].find("td").text.replace("Форма обучения - ", "")
-        faculty_name = direct_data[4].find("td").text.replace("Подразделение - ", "")
-        level = direct_data[5].find("td").text.replace("Уровень подготовки - ", "")
-        _ = direct_data[6].find("td").text.replace("Направление подготовки/специальность - ", "")  # Unused
-        group_name = direct_data[7].find("td").text.replace("Основание поступления - ", "")
-        category_name = direct_data[8].find("td").text.replace("Категория приема - ", "")
-        real_direct_name = direct_data[9].find("td").text.replace("Конкурсная группа - ", "")
-        ctrl_number_inner = direct_data[10].find("td").text
-        titles = list(map(lambda x: x.text, direct_data[12].findall("td")))
-        reqs = direct_data[13:]
-
-        faculty = Faculty.from_name_and_uni(pstu, faculty_name)
-        direct = Direct.from_name_and_fac(faculty, real_direct_name, form, level)
-        ctrl_number = Direct.Category.CtrlNumber(int(ctrl_number_inner.split()[2][:-1]),
-                                                 int(ctrl_number_inner.split()[-1][:-1]))
-        if group_name == "Целевой приём" or group_name == "Целевой прием":
-            group = direct[Direct.Group.Type.BUDGET]
-            category = group[Direct.Category.Type.TARGET]
-        else:
-            group = direct[group_aliases[group_name]]
-            category = group[category_aliases[category_name]]
-        category.ctrl_number = ctrl_number.total
-
-        index_data = {
-            "rating": {
-                "i": None,
-                "aliases": [
-                    "№",
-                    "Номер ПП"
-                ]
-            }, "snils": {
-                "i": None,
-                "aliases": [
-                    "Уникальный код"
-                ]
-            }, "total_sum": {
-                "i": None,
-                "aliases": [
-                    "Сумма баллов"
-                ]
-            }, "original_doc": {
-                "i": None,
-                "aliases": [
-                    "Оригинал в вузе",
-                    "Вид документа",
-                    "Вид документа об образовании"
-                ]
-            }
-        }
-
-        index_title = accept_indexes(index_data, titles)
-
-        for req_data in reqs:
-            cols = req_data.findall("td")
-            rating = int(cols[index_title["rating"]].text)
-            snils = cols[index_title["snils"]].text
-            total_sum = int(cols[index_title["total_sum"]].text) if index_title["total_sum"] is not None else 0
-            original_doc = difflib.SequenceMatcher(
-                a="Оригинал",
-                b=(cols[index_title["original_doc"]].text or "").strip()
-            ).ratio() > 0.9
-
-            Request.add(rating, User.from_snils(snils), category,
-                        total_sum=total_sum, original_doc=original_doc)
-
-    logging.info(f"PSTU ready!")
-
-
 def parse_all():
     logging.info("Parsing started...")
     t = time.time()
     Request.reset()
     CONN.commit()
     parse_psu()
-    parse_pstu()
-    CUR.execute(f"UPDATE update_data SET last_update_timestamp = {t}")
+
     CONN.commit()
     logging.info(f"Parsing completed at {time.time() - t}s")
 
