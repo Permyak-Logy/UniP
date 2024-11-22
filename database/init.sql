@@ -45,9 +45,10 @@ create table public.directs
         constraint directs_pk2
             unique,
     constraint directs_pk
-        primary key (university, faculty, name)
+        primary key (university, faculty, name, form, level)
 );
-alter table public.directs add constraint chk_code CHECK ( code ~* '\d\d\.\d\d\.\d\d' );
+alter table public.directs
+    add constraint chk_code CHECK ( code ~* '\d\d\.\d\d\.\d\d' );
 
 create table public.category_types
 (
@@ -70,7 +71,7 @@ create table public.groups
     category_type text    not null
         constraint groups_category_types_name_fk
             references public.category_types,
-    ctrl_number   integer not null ,
+    ctrl_number   integer not null,
     constraint groups_pk
         primary key (direct, group_type, category_type)
 );
@@ -93,8 +94,8 @@ create table public.requests
         constraint requests_users_snils_fk
             references public.users,
     rating       integer not null,
-    total_sum    integer default 0,
-    original_doc boolean default false,
+    total_sum    integer          default 0,
+    original_doc boolean          default false,
     year         integer not null default extract(year from current_date),
     priority     integer not null default 1,
     constraint requests_pk
@@ -115,10 +116,6 @@ create table public.passing_score
         primary key (direct, group_type, year)
 );
 
-create table update_data (
-    last_update_timestamp   timestamp default 0
-);
-
 INSERT INTO group_types (name)
 VALUES ('Бюджет'),
        ('Договор'),
@@ -135,9 +132,17 @@ VALUES ('Общий конкурс'),
 INSERT INTO form_types (name)
 VALUES ('Очно'),
        ('Заочно'),
-       ('Очно/заочно');
+       ('Очно/Заочно');
 
 INSERT INTO level_types (name)
 VALUES ('Бакалавриат'),
        ('Магистратура'),
        ('Асперантура');
+
+create table update_data
+(
+    last_update_timestamp integer not null default 0
+);
+
+INSERT INTO update_data (last_update_timestamp)
+VALUES (0);

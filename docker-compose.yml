@@ -14,13 +14,13 @@ services:
       - ./database/pg_hba.conf:/var/lib/postgresql/data/pg_hba.conf
       - ./database/postgresql.conf:/var/lib/postgresql/data/postgresql.conf
     ports:
-      - "50001:5432"
+      - "5432:5432"
     networks:
       - unip_net
 
   parser:
     build: parser/
-    restart: always
+
     depends_on:
       - db
     environment:
