@@ -185,7 +185,7 @@ class Parser:
         self.url = url
         self.uni = University(name=name_uni, city=city_uni)
 
-    def parse_applicant_list(self, url: str):
+    def parse_applicant_list(self, url: str) -> "University":
         pass
 
     def save_to_db(self, cur):
@@ -271,7 +271,7 @@ class PSUParser(Parser):
     def __init__(self):
         super().__init__(PSUParser.URL, 'ПГНИУ', "Пермь")
 
-    def parse_applicant_list(self, url: str):
+    def parse_applicant_list(self, url: str) -> "University":
         logging.info(f"Parsing PSU")
 
         logging.info(f"Download tables")
@@ -411,6 +411,8 @@ class PSUParser(Parser):
                         Request(group, User.from_snils(snils), rating, total_sum, original_doc)
 
         logging.info(f"PSU ready!")
+
+        return self.uni
 
 
 def main():

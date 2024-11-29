@@ -18,10 +18,6 @@ def select_count_user_consent_on_other_directs(user: str, group_id: int, cur: cu
     return cur.fetchone()[0]
 
 
-def select_current_passing_score():
-    pass
-
-
 def select_consent_users(direct: int, group_type: str, category_type: str, cur: cursor):
     cur.execute(SELECT_CONSENT_USERS, vars={"direct": direct, "group": group_type, "category": category_type})
     return cur.fetchall()

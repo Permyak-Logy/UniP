@@ -21,16 +21,6 @@ def get_real_rating(user: str):
     return Response(json.dumps(data, ensure_ascii=False), content_type="application/json; charset=utf-8")
 
 
-@app.route('/get_current_passing_score/<direct>/<group>/<category>')
-def get_user_groups(direct: str, group: str, category: str):
-    with psycopg2.connect(host="db", database="postgres", user="postgres", password="rooter") as conn:
-        conn: psycopg2.extensions.connection
-        with conn.cursor() as cur:
-            cur: psycopg2.extensions.cursor
-            data = applicant_service.get_current_passing_score(int(direct), group, category, cur)
-    return Response(json.dumps(data, ensure_ascii=False), content_type="application/json; charset=utf-8")
-
-
 @app.route('/get_user_groups/<user>')
 def get_user_groups(user):
     with psycopg2.connect(host="db", database="postgres", user="postgres", password="rooter") as conn:
@@ -38,6 +28,16 @@ def get_user_groups(user):
         with conn.cursor() as cur:
             cur: psycopg2.extensions.cursor
             data = applicant_service.get_user_groups(user, cur)
+    return Response(json.dumps(data, ensure_ascii=False), content_type="application/json; charset=utf-8")
+
+
+@app.route('/get_current_passing_score/<direct>/<group>/<category>')
+def get_current_passing_score(direct: str, group: str, category: str):
+    with psycopg2.connect(host="db", database="postgres", user="postgres", password="rooter") as conn:
+        conn: psycopg2.extensions.connection
+        with conn.cursor() as cur:
+            cur: psycopg2.extensions.cursor
+            data = applicant_service.get_current_passing_score(int(direct), group, category, cur)
     return Response(json.dumps(data, ensure_ascii=False), content_type="application/json; charset=utf-8")
 
 

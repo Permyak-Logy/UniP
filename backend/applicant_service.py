@@ -2,6 +2,7 @@ from collections import defaultdict
 from applicant_repository import select_groups_user, select_consent_users, select_count_users_consent_on_direct, select_count_user_consent_on_other_directs, select_ctrl_number, select_current_passing_score
 import psycopg2.extensions
 
+
 def calculate_statistic_direct(rating: int, consent: int, consent_on_other: int, ctrl_number: int):
     return {
         'real_rating': rating - consent_on_other - consent,
