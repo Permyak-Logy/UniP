@@ -34,8 +34,7 @@ async def rating_handler(message: types.Message) -> None:
         user = args[1].strip().replace(' ', '').replace('-', '')
 
         # Запрос данных из backend
-        response = requests.get(
-            f"http://127.0.0.1:50000/get_real_rating/{user}")  # (f"http://backend:80/get_real_rating/{user}")
+        response = requests.get(f"http://backend:80/get_real_rating/{user}")
         data_json = response.json()
 
         if not data_json:
