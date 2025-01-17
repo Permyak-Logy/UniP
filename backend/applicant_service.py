@@ -1,5 +1,5 @@
 from collections import defaultdict
-from applicant_repository import select_groups_user, select_consent_users, select_count_users_consent_on_direct, select_count_user_consent_on_other_directs, select_ctrl_number, select_current_passing_score
+from applicant_repository import select_groups_user, select_consent_users, select_count_users_consent_on_direct, select_count_user_consent_on_other_directs, select_ctrl_number
 import psycopg2.extensions
 
 
