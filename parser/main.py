@@ -21,6 +21,10 @@ class University:
         self._directs: list["Direct"] = []
         University.ALL.append(self)
 
+    def __iter__(self):
+        for direct in self.directs:
+            yield direct
+
     @property
     def directs(self) -> list["Direct"]:
         return self._directs
@@ -62,7 +66,10 @@ class Direct:
 
         self._groups: set["Group"] = set()
 
-    def __getitem__(self, key: tuple["Group.GroupType", "Group.CategoryType"]) -> "Group":
+    def __getitem__(self, key: tuple[str, str]) -> "Group":
+        """
+        key: tuple["Group.GroupType", "Group.CategoryType"]
+        """
         group_type, category_type = key
 
         for group in self.groups:
@@ -75,6 +82,10 @@ class Direct:
         group = Group(direct=self, group_type=group_type, category_type=category_type, ctrl_number=1)
         self._groups.add(group)
         return group
+
+    def __iter__(self):
+        for group in self.groups:
+            yield group
 
     def __hash__(self):
         return hash(self.id)
@@ -105,8 +116,13 @@ class Group:
         FOREIGN = "Иностранцы"
         TARGET = "Целевое"
 
-    def __init__(self, *, direct: "Direct", group_type: "Group.GroupType", category_type: "Group.CategoryType",
-                 ctrl_number: int):
+    def __init__(self, *, direct: "Direct", group_type: str, category_type: str, ctrl_number: int):
+        """
+        direct: "Direct"
+        group_type: "Group.GroupType"
+        category_type: "Group.CategoryType"
+        ctrl_number: int
+        """
         Group._count += 1
 
         self.id = Group._count
@@ -119,6 +135,10 @@ class Group:
 
     def __hash__(self):
         return hash(f"{self.id}")
+
+    def __iter__(self):
+        for request in self.requests:
+            yield request
 
     @property
     def requests(self) -> list["Request"]:
@@ -180,24 +200,26 @@ class Request:
         Request._count = 0
 
 
+# Factory method
 class Parser:
-    def __init__(self, url: str, name_uni: str, city_uni: str):
+    def __init__(self, url: str, uni: "University"):
         self.url = url
-        self.uni = University(name=name_uni, city=city_uni)
+        self.uni = uni
 
-    def parse_applicant_list(self, url: str) -> "University":
+    def parse_applicant_list(self) -> "University":
         pass
 
-    def save_to_db(self, cur):
+    @staticmethod
+    def save_to_db(uni, cur):
         cur.execute(
             f"insert into universities(name, city) "
-            f"values ('{self.uni.name}', '{self.uni.city}')"
+            f"values ('{uni.name}', '{uni.city}')"
         )
 
-        for direct in self.uni.directs:
+        for direct in uni:
             cur.execute(
                 f"insert into directs(university, faculty, code, name, form, level, id) "
-                f"values ('{self.uni.name}', '{direct.faculty}', '{direct.code}', "
+                f"values ('{uni.name}', '{direct.faculty}', '{direct.code}', "
                 f"'{direct.name}', %(direct_form)s, %(direct_level)s, {direct.id})",
                 vars={
                     "direct_form": direct.form,
@@ -205,7 +227,7 @@ class Parser:
                 }
             )
 
-            for group in direct.groups:
+            for group in direct:
                 cur.execute(
                     f"insert into groups(id, direct, group_type, category_type, ctrl_number) "
                     f"values ({group.id}, {direct.id}, %(group_group_type)s, "
@@ -215,7 +237,7 @@ class Parser:
                         "group_category_type": group.category_type
                     }
                 )
-                for request in group.requests:
+                for request in group:
                     cur.execute(
                         f"insert into users(snils) "
                         f"values ('{request.user.snils}')"
@@ -265,17 +287,28 @@ class Parser:
                 time.sleep(0.1)
 
 
+class PSU(University):
+    def __init__(self):
+        super().__init__(name="ПГНИУ", city="Пермь")
+
+
+class PSTU(University):
+    def __init__(self):
+        super().__init__(name="ПНИПУ", city="Пермь")
+
+
+# Singleton
 class PSUParser(Parser):
     URL = f"http://www.psu.ru/files/docs/priem-2022"
 
-    def __init__(self):
-        super().__init__(PSUParser.URL, 'ПГНИУ', "Пермь")
+    def __init__(self, url: str = None):
+        super().__init__(url or PSUParser.URL, PSU())
 
-    def parse_applicant_list(self, url: str) -> "University":
+    def parse_applicant_list(self) -> "University":
         logging.info(f"Parsing PSU")
 
         logging.info(f"Download tables")
-        psu_data = requests.get(url).content.decode('utf8')
+        psu_data = requests.get(self.url).content.decode('utf8')
         directs_data = html.fromstring(psu_data).xpath("//article")
 
         logging.info("Parse")
@@ -415,8 +448,18 @@ class PSUParser(Parser):
         return self.uni
 
 
+class PSTUParser(Parser):
+    URL = ""
+
+    def __init__(self, url: str = None):
+        super().__init__(url or PSTUParser.URL, PSTU())
+
+    def parse_applicant_list(self) -> "University":
+        return self.uni
+
+
 def main():
-    parsers = [PSUParser()]
+    parsers = [PSUParser(), PSTUParser()]
     Parser.wain_conn()
     while True:
         try:
@@ -438,8 +481,9 @@ def main():
                         con.commit()
 
                         for parser in parsers:
-                            parser.parse_applicant_list(parser.url)
-                            parser.save_to_db(cur)
+                            uni = parser.parse_applicant_list()
+                            Parser.save_to_db(uni, cur)
+
                         con.commit()
                         logging.info(f"Parsing completed at {time.time() - t}s")
 
