@@ -9,8 +9,9 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message
 from aiogram.utils.markdown import hbold, hcode
 import requests
+from aiogram.client.default import DefaultBotProperties
 
-TOKEN = getenv("BOT_TOKEN")
+TOKEN = "6949424987:AAHMCBHGNEP0O-Dr9z-vTDSNsSiTZ7Yl5gk"  # getenv("BOT_TOKEN")
 
 dp = Dispatcher()
 
@@ -26,23 +27,26 @@ async def echo_handler(message: types.Message) -> None:
     try:
         user = message.text.strip().replace(' ', '').replace('-', '')
         data = requests.get(
-            f"http://backend:80/ratings/{user}").json()
-        if not data:
+            f"http://backend:80/get_real_rating/{user}"
+        )
+        data_json = data.json()
+        if not data_json:
             await message.answer(f"Данные о '{user}' небыли найдены. Проверьте СНИЛС и/или попробуйте позднее...")
             return
-        for uni, dirs in data.items():
+        for uni, dirs in data_json.items():
             await message.answer(hbold(f"{uni} ({user})") + "\n" + "\n\n".join(
-                f"{hbold(info['direct'])}:"
+                f"{hbold(info['name'])}:"
                 f"\n\t\t\tРейтинг={hcode(info['real_rating'])}"
                 f"\n\t\t\tСогласия={hcode(info['consent'])}/{hcode(info['ctrl_number'])}"
                 f"\n\t\t\tЛюдей на место={hcode(info['competition'])}"
-                for category_id, info in dirs.items()))
+                for group_id, info in dirs.items()))
     except Exception as E:
         logging.warning(str(type(E)) + ":" + str(E))
+        await message.answer("Извините, произошёл внутренний сбой. Повторите попытку позднее")
 
 
 async def main():
-    bot = Bot(TOKEN)
+    bot = Bot(TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     await dp.start_polling(bot)
 
 
